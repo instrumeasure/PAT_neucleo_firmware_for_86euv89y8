@@ -32,7 +32,7 @@ ext_clk,ADS127_CONFIG4_USER=0x80 default in ads127l11.h (external master clock o
 quartet_order,SPI1→SPI2→SPI3→SPI4|last_raw[4] only if all four reads OK
 clk_source,HAT generates CLK → MCU does not drive unless you add MCO/TIM doc’d in code
 qpd_dsp,3×16 ring per path raw|I|Q y=(sum)>>4|p nibble in SPI6 hdr
-spi6_j2,PA5 SCK PG8 MISO PG12 MOSI PG14 NSS|SPI6 slave fmt0x02 64B LE sample_index+8B hdr+4×3×24b BE+pad|IT double-buffer
+spi6_j2,PA5 SCK PG8 NSS PG12 MISO PG14 MOSI|SPI6 slave fmt0x02 64B LE sample_index+8B hdr+4×3×24b BE+pad|IT double-buffer
 spi6_sclk,master sets f_SCLK|target &gt; SPI1–4 and &gt; 14.4 MHz per system design or AGENTS waiver
 ```
 

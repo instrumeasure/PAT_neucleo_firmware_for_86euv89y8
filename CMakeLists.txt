@@ -84,12 +84,9 @@ set(STARTUP_ASM "${STM32_CUBE_H7_FW}/Drivers/CMSIS/Device/ST/STM32H7xx/Source/Te
 set(SYSTEM_SRC "${STM32_CUBE_H7_FW}/Drivers/CMSIS/Device/ST/STM32H7xx/Source/Templates/system_stm32h7xx.c")
 
 set(APP_SOURCES
-  "${CMAKE_SOURCE_DIR}/src/main.c"
+  "${CMAKE_SOURCE_DIR}/src/main_spi_test.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11_hal_stm32.c"
-  "${CMAKE_SOURCE_DIR}/src/app_state.c"
-  "${CMAKE_SOURCE_DIR}/src/qpd_dsp.c"
-  "${CMAKE_SOURCE_DIR}/src/qpd_spi6_slave.c"
   "${CMAKE_SOURCE_DIR}/lib/ADS127TI/src/ads127l11.c"
 )
 

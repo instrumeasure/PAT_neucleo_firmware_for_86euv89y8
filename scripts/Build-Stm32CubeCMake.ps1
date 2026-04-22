@@ -21,8 +21,16 @@ Either:
 $tc = (Join-Path $repo "cmake\gcc-arm-none-eabi.cmake").Replace('\', '/')
 $fwFwd = $fw.Replace('\', '/')
 
-# Refresh PATH so Ninja is visible (after winget install).
+# Refresh PATH (Machine + User), then prepend local Ninja + PlatformIO arm-none-eabi when present.
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+$pioGcc = Join-Path $env:USERPROFILE ".platformio\packages\toolchain-gccarmnoneeabi\bin"
+if (Test-Path (Join-Path $pioGcc "arm-none-eabi-gcc.exe")) {
+    $env:Path = "$pioGcc;$($env:Path)"
+}
+$ninjaLocal = Join-Path $repo "tools"
+if (Test-Path (Join-Path $ninjaLocal "ninja.exe")) {
+    $env:Path = "$ninjaLocal;$($env:Path)"
+}
 
 $cmakeArgs = @(
     "-B", $buildDir,

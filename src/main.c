@@ -2,9 +2,11 @@
 #include "stm32h7xx_hal.h"
 #include "ads127l11.h"
 #include "ads127l11_hal_stm32.h"
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 #include "app_state.h"
 #include "qpd_dsp.h"
 #include "qpd_spi6_slave.h"
+#endif
 
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
@@ -14,9 +16,10 @@ SPI_HandleTypeDef hspi6;
 UART_HandleTypeDef huart3;
 TIM_HandleTypeDef htim6;
 
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 /*
- * Quartet gate — match ADS127 ODR: CONFIG3 OSR256 wideband, f_CLK from CONFIG4.
- * @ 25.0 MHz external CLK use ADS127_ODR_HZ_25M_EXT; @ 25.6 MHz internal use 50 k.
+ * Quartet gate — TIM6 vs nominal ODR (bring-up leaves CONFIG at POR; macro matches expected profile).
+ * ADS127_CONFIG4_USER bit7: 25 MHz ext path ~48.8 k; internal 25.6 MHz nominal 50 k (see ads127l11.h).
  */
 #if (ADS127_CONFIG4_USER & 0x80U) != 0U
 #define SAMPLE_RATE_HZ ADS127_ODR_HZ_25M_EXT
@@ -33,6 +36,7 @@ static int32_t g_last_raw[ADS127_SYNC_CHANNELS] = {
     ADS127_RAW_INVALID,
     ADS127_RAW_INVALID,
     ADS127_RAW_INVALID};
+#endif /* !PAT_SPI_VERIFY_ONLY */
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -42,14 +46,18 @@ static void MX_SPI3_Init(void);
 static void MX_SPI4_Init(void);
 static void MX_USART3_UART_Init(void);
 static void Error_Handler(void);
+static void state_led_write(GPIO_PinState level);
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 static bool adc_sample_gate_take_one(void);
 static void MX_TIM6_SampleGate_Init(void);
 static void MX_SPI6_Init(void);
 static void heartbeat_tick(void);
 static void state_led_tick(void);
-static void state_led_write(GPIO_PinState level);
 static void early_led_sanity_sweep(void);
 static void MX_Reassert_UserLeds_AsOutputs(void);
+#else
+static void run_spi_verify_only(void);
+#endif
 
 int _write(int file, char *ptr, int len)
 {
@@ -63,6 +71,14 @@ int _write(int file, char *ptr, int len)
 
 int main(void)
 {
+#if defined(PAT_SPI_VERIFY_ONLY) && PAT_SPI_VERIFY_ONLY
+    HAL_Init();
+    SystemClock_Config();
+    run_spi_verify_only();
+    while (1)
+    {
+    }
+#else
     uint32_t i;
     bool startup_ok = true;
     ads127_sample_set_t sample_set;
@@ -124,6 +140,14 @@ int main(void)
     qpd_spi6_slave_init(&hspi6);
 
     printf("BOOT,%s,%lu\r\n", app_state_to_string(g_state), HAL_GetTick());
+    for (i = 0U; i < ADS127_SYNC_CHANNELS; i++)
+    {
+        printf("ADC_SPI,ch%u,DEV,%02X,REV,%02X,ST,%02X\r\n",
+               (unsigned)i,
+               (unsigned)g_ads[i].dev_id_hw,
+               (unsigned)g_ads[i].rev_id_hw,
+               (unsigned)g_ads[i].status_hw);
+    }
 
     if (g_state == APP_STATE_RUN)
     {
@@ -160,8 +184,10 @@ int main(void)
         state_led_tick();
         heartbeat_tick();
     }
+#endif /* !PAT_SPI_VERIFY_ONLY */
 }
 
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 static bool adc_sample_gate_take_one(void)
 {
     bool take = false;
@@ -275,6 +301,68 @@ static void heartbeat_tick(void)
            raw1,
            raw2,
            raw3);
+    /* Live RREG on DEV_ID / REV_ID / STATUS every heartbeat for SPI verification (SBAS946). */
+    {
+        uint32_t c;
+        uint8_t v;
+
+        for (c = 0U; c < ADS127_SYNC_CHANNELS; c++)
+        {
+            if (!ads127_read_register(&g_ads[c], ADS127_REG_DEV_ID, &v, 0, 0))
+            {
+                g_ads[c].dev_id_hw = 0xFFU;
+            }
+            else
+            {
+                g_ads[c].dev_id_hw = v;
+            }
+            if (!ads127_read_register(&g_ads[c], ADS127_REG_REV_ID, &v, 0, 0))
+            {
+                g_ads[c].rev_id_hw = 0xFFU;
+            }
+            else
+            {
+                g_ads[c].rev_id_hw = v;
+            }
+            if (!ads127_read_register(&g_ads[c], ADS127_REG_STATUS, &v, 0, 0))
+            {
+                g_ads[c].status_hw = 0xFFU;
+            }
+            else
+            {
+                g_ads[c].status_hw = v;
+            }
+        }
+    }
+    printf("ADC_SPI_IDS,ch0,DEV,%02X,REV,%02X,ST,%02X,ch1,DEV,%02X,REV,%02X,ST,%02X,ch2,DEV,%02X,REV,%02X,ST,%02X,ch3,DEV,%02X,REV,%02X,ST,%02X\r\n",
+           (unsigned)g_ads[0].dev_id_hw,
+           (unsigned)g_ads[0].rev_id_hw,
+           (unsigned)g_ads[0].status_hw,
+           (unsigned)g_ads[1].dev_id_hw,
+           (unsigned)g_ads[1].rev_id_hw,
+           (unsigned)g_ads[1].status_hw,
+           (unsigned)g_ads[2].dev_id_hw,
+           (unsigned)g_ads[2].rev_id_hw,
+           (unsigned)g_ads[2].status_hw,
+           (unsigned)g_ads[3].dev_id_hw,
+           (unsigned)g_ads[3].rev_id_hw,
+           (unsigned)g_ads[3].status_hw);
+
+    /*
+     * After ERR_ADC the main loop does not read the quartet, so SPI is otherwise idle.
+     * Short transfers here give a repeating scope pattern (CS + SCLK on each bus).
+     */
+    if (g_state == APP_STATE_ERR_ADC)
+    {
+        uint8_t tx[3] = {0U, 0U, 0U};
+        uint8_t rx[3];
+        uint32_t c;
+
+        for (c = 0U; c < ADS127_SYNC_CHANNELS; c++)
+        {
+            (void)ADS127_HAL_SPI_Transfer((uint8_t)c, tx, rx, 3U, 10U);
+        }
+    }
 }
 
 static void state_led_tick(void)
@@ -324,14 +412,16 @@ static void state_led_tick(void)
     next_ms = now + interval_ms;
 }
 
+#endif /* !PAT_SPI_VERIFY_ONLY */
+
 static void state_led_write(GPIO_PinState level)
 {
-    /* NUCLEO-H753ZI user LEDs per STM32H7xx Nucleo BSP: LD1=PB0, LD2=PB7, LD3=PB14. */
+    /* LD1=PB0, LD2=PB7. PB14 is SPI2_MISO (CubeMX); LD3 on PB14 is not used. */
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, level);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, level);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, level);
 }
 
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 static void early_led_sanity_sweep(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -344,7 +434,7 @@ static void early_led_sanity_sweep(void)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_14;
+    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
     GPIO_InitStruct.Pin = GPIO_PIN_1;
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
@@ -352,14 +442,16 @@ static void early_led_sanity_sweep(void)
     for (i = 0U; i < 8U; i++)
     {
         GPIO_PinState level = (i & 1U) ? GPIO_PIN_SET : GPIO_PIN_RESET;
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_14, level);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0 | GPIO_PIN_7, level);
         HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, level);
         HAL_Delay(120U);
     }
 
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_14, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0 | GPIO_PIN_7, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
 }
+
+#endif /* !PAT_SPI_VERIFY_ONLY — early_led_sanity_sweep */
 
 static void MX_SPI1_Init(void)
 {
@@ -370,8 +462,8 @@ static void MX_SPI1_Init(void)
     hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
     hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
     hspi1.Init.NSS = SPI_NSS_SOFT;
-    /* Faster SPI so four sequential 24-bit reads fit inside one 50 kHz frame (~20 us). */
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+    /* SCLK = f_spi_ker / prescaler; slower SPI eases SI / long leads vs ADS127 (was ÷32). */
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
     hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
     hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
     hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -384,7 +476,8 @@ static void MX_SPI1_Init(void)
     hspi1.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
     hspi1.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
     hspi1.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-    hspi1.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+    /* ST CubeH7 SPI examples recommend ENABLE to avoid output glitches on H7 SPI masters. */
+    hspi1.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
     hspi1.Init.IOSwap = SPI_IO_SWAP_DISABLE;
 
     if (HAL_SPI_Init(&hspi1) != HAL_OK)
@@ -423,6 +516,7 @@ static void MX_SPI4_Init(void)
     }
 }
 
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 static void MX_SPI6_Init(void)
 {
     hspi6.Instance = SPI6;
@@ -456,6 +550,8 @@ static void MX_SPI6_Init(void)
     HAL_NVIC_SetPriority(SPI6_IRQn, 5U, 0U);
     HAL_NVIC_EnableIRQ(SPI6_IRQn);
 }
+
+#endif /* !PAT_SPI_VERIFY_ONLY */
 
 static void MX_USART3_UART_Init(void)
 {
@@ -503,8 +599,8 @@ static void MX_GPIO_Init(void)
     GPIO_InitStruct.Pin = GPIO_PIN_4;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    /* LD1=PB0, LD2=PB7, LD3=PB14 — one init avoids partial MODER churn on GPIOB. */
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_14;
+    /* LD1=PB0, LD2=PB7 (PB14 reserved for SPI2 MISO). */
+    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     GPIO_InitStruct.Pin = GPIO_PIN_11;
@@ -514,16 +610,68 @@ static void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 }
 
+#if !defined(PAT_SPI_VERIFY_ONLY) || !PAT_SPI_VERIFY_ONLY
 static void MX_Reassert_UserLeds_AsOutputs(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_14;
+    /* Do not touch PB10/PB14/PB15 — SPI2 AF after MX_SPI2_Init. */
+    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 }
+
+#endif /* !PAT_SPI_VERIFY_ONLY */
+
+#if defined(PAT_SPI_VERIFY_ONLY) && PAT_SPI_VERIFY_ONLY
+static void run_spi_verify_only(void)
+{
+    uint32_t i;
+    ads127_device_t ads[ADS127_SYNC_CHANNELS];
+
+    MX_GPIO_Init();
+    MX_SPI1_Init();
+    MX_SPI2_Init();
+    MX_SPI3_Init();
+    MX_SPI4_Init();
+    MX_USART3_UART_Init();
+
+    ADS127_HAL_BindSpi(0U, &hspi1);
+    ADS127_HAL_BindSpi(1U, &hspi2);
+    ADS127_HAL_BindSpi(2U, &hspi3);
+    ADS127_HAL_BindSpi(3U, &hspi4);
+
+    ADS127_HAL_SetCsPin(0U, GPIOA, GPIO_PIN_4);
+    ADS127_HAL_SetCsPin(1U, GPIOB, GPIO_PIN_4);
+    ADS127_HAL_SetCsPin(2U, GPIOA, GPIO_PIN_15);
+    ADS127_HAL_SetCsPin(3U, GPIOE, GPIO_PIN_11);
+    ADS127_HAL_SetStartPin(GPIOF, GPIO_PIN_1);
+    ADS127_HAL_SetResetPin(GPIOF, GPIO_PIN_0);
+
+    for (i = 0U; i < ADS127_SYNC_CHANNELS; i++)
+    {
+        ads127_init_device(&ads[i], (uint8_t)i);
+    }
+
+    printf("SPI_VERIFY,reset,DEV_ID expect 0x%02X\r\n", (unsigned)ADS127_DEV_ID_EXPECTED);
+
+    for (;;)
+    {
+        for (i = 0U; i < ADS127_SYNC_CHANNELS; i++)
+        {
+            bool ok = ads127_spi_verify_link(&ads[i]);
+            printf("SPI_VERIFY,ch%u,%s,DEV,%02X,REV,%02X\r\n",
+                   (unsigned)i,
+                   ok ? "OK" : "FAIL",
+                   (unsigned)ads[i].dev_id_hw,
+                   (unsigned)ads[i].rev_id_hw);
+        }
+        HAL_Delay(500U);
+    }
+}
+#endif
 
 void HAL_SPI_MspInit(SPI_HandleTypeDef *spiHandle)
 {
@@ -545,17 +693,15 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *spiHandle)
     }
     else if (spiHandle->Instance == SPI2)
     {
+        /* PB10 SCK, PB15 MOSI, PB14 MISO — matches STM32CubeMX PAT pinout. */
         __HAL_RCC_SPI2_CLK_ENABLE();
 
-        GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_15;
+        GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_14 | GPIO_PIN_15;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
         GPIO_InitStruct.Pull = GPIO_NOPULL;
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
         GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
         HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-        GPIO_InitStruct.Pin = GPIO_PIN_2;
-        HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     }
     else if (spiHandle->Instance == SPI3)
     {
@@ -585,7 +731,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *spiHandle)
     }
     else if (spiHandle->Instance == SPI6)
     {
-        /* Inter-HAT J2: PA5 SCK (slave, clock in), PG8 MISO, PG12 MOSI, PG14 NSS — AF8 (RM0433). */
+        /* Inter-HAT J2: PA5 SCK, PG8 NSS, PG12 MISO, PG14 MOSI — AF8 (RM0433). */
         __HAL_RCC_SPI6_CLK_ENABLE();
 
         GPIO_InitStruct.Pin = GPIO_PIN_5;
@@ -672,6 +818,12 @@ static void SystemClock_Config(void)
 
 static void Error_Handler(void)
 {
+#if defined(PAT_SPI_VERIFY_ONLY) && PAT_SPI_VERIFY_ONLY
+    while (1)
+    {
+        HAL_Delay(250U);
+    }
+#else
     /* Ensure LED pins are usable even if init failed early. */
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOE_CLK_ENABLE();
@@ -683,4 +835,5 @@ static void Error_Handler(void)
         heartbeat_tick();
         HAL_Delay(10U);
     }
+#endif
 }

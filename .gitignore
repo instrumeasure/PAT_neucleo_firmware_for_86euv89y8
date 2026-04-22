@@ -6,3 +6,4 @@ framework-stm32cubeh7/
 
 # Local tooling
 .cache/
+tools/ninja.exe

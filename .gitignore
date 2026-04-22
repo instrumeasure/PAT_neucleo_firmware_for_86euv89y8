@@ -1,0 +1,8 @@
+.pio
+cmake-build/
+
+# Created by scripts/Ensure-STM32CubeFrameworkLink.ps1 — points at ~/.platformio/packages/framework-stm32cubeh7
+framework-stm32cubeh7/
+
+# Local tooling
+.cache/

@@ -1,0 +1,14 @@
+---
+description: STM32 embedded C/HAL conventions for PAT Nucleo firmware
+globs: "**/*.{c,h}"
+alwaysApply: false
+---
+
+# STM32 firmware (this repo)
+
+- **Board / stack:** PAT assumes the **Legacy** QPD ADC HAT (**86euv89y8**) on **J1** and STM32 **H753ZI-class** Nucleo pinout per project `.ioc` — do not use another ADC HAT revision’s GPIO meanings without updating **AGENTS.md**.
+- Follow the **existing** Cube/HAL layout: `Core/Src`, `Core/Inc`, `Drivers`, and any `Middlewares` already in the tree. Do not relocate generated files unless the human is regenerating CubeMX.
+- Prefer **HAL** or **LL** consistently with what the project already uses; avoid mixing styles in one module without a migration plan.
+- ISRs: no blocking calls, minimal work, clear volatile/shared-data boundaries. Consider **DMA** for SPI streams when conversion rate is high.
+- GPIO/SPI alternate functions and speeds must match the **MCU datasheet** and **board routing**; if unknown, say so and point to `.ioc` or hardware docs.
+- Use project **asserts** or error returns for init failure; avoid infinite blind retry loops without backoff or logging hooks if the project has them.

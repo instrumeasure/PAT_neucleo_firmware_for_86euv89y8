@@ -1,0 +1,21 @@
+
+Unit testing is optional; primary firmware verification remains CMake build + on-target behaviour (`AGENTS.md`).
+
+## PlatformIO Unity + `stm32cube`
+
+PlatformIO does **not** ship a stock Unity UART bridge for **`framework = stm32cube`**. This repo adds:
+
+- **`unity_config.h`** / **`unity_config.c`** — routes Unity output over **USART3** (**PD8/PD9**, 115200), same ST-Link VCP as the application.
+- **`test_smoke/`** — minimal smoke test.
+
+In **`platformio.ini`**, **`test_build_src = no`** avoids compiling **`src/main.c`** during **`pio test`** (would duplicate **`main`** and **`HAL_UART_MspInit`**).
+
+Run:
+
+```text
+py -m platformio test -e nucleo_h753zi
+```
+
+The runner uploads the test firmware and reads results on the serial port. **Close any other tool using the ST-Link COM port** or the testing phase cannot attach (Unity lines may be skipped even if upload succeeds).
+
+Further reading: [Unity on PlatformIO](https://docs.platformio.org/en/latest/advanced/unit-testing/frameworks/unity.html), ST example [stm32cube unit-testing](https://github.com/platformio/platformio-examples/tree/develop/unit-testing/stm32cube).

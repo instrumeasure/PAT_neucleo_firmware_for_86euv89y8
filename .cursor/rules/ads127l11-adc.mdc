@@ -1,0 +1,16 @@
+---
+description: TI ADS127L11 ADC — SPI, DRDY, Legacy 86euv89y8 J1 mapping
+globs: "**/*.{c,h}"
+alwaysApply: false
+---
+
+# ADS127L11 (external ADC)
+
+- **Hardware target:** Legacy QPD ADC HAT **86euv89y8** via **J1**. **START** is on **J1-26** (MCU **PF1**); active-low **RESET** is on **J1-27** (MCU **PF0**). Four ADS127L11 devices share **START**/**RESET**; **!CS**/**SPI** are **per channel** (SPI1–4). **`toggleRESET()`** on a dedicated RESET line is valid on this revision. Do **not** use **86ex5v90x** mappings (`!ADC_EN` on J1-26, START on J1-27) in this repo unless explicitly migrating.
+- Treat the **TI data sheet** ([ADS127L11 PDF](https://www.ti.com/lit/ds/symlink/ads127l11.pdf)) as authoritative for commands, timing, filters, and CRC. Do not invent register maps.
+- **CLK** limits and **high-speed vs low-speed** modes affect throughput and power; align `f_CLK`, filter choice, and OSR with product requirements.
+- **SPI mode 1** (CPOL = 0, CPHA = 1) per PAT hardware notes; keep HAL phase/polarity consistent with the ADC board.
+- Serial: respect **CS**/`SCLK`/`SDI`/`SDO` timing; honour **delay from CS assert to first SCLK** where specified. Optional **CRC** must match firmware and device config.
+- **DRDY** / **SDO/DRDY**: ensure the read path matches the chosen mode (polling vs EXTI); avoid reading before data is ready.
+- Output words are **24-bit**; preserve full resolution in buffers unless a downstream protocol explicitly defines packing.
+- **Daisy-chain**: only implement if hardware and product require it; single-device code paths are simpler and differ on the wire.

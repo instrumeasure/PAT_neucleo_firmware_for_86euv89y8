@@ -1,0 +1,76 @@
+# STM32-for-Vscode (bmd.stm32-for-vscode) — optional alternative to PlatformIO for this repo.
+#
+# Prerequisites:
+#   1. Install VS Code extensions: "STM32 for VSCode" (bmd), "Cortex-Debug".
+#   2. Junction the PlatformIO STM32Cube framework into the repo (HAL/CMSIS, ~100 MB via symlink):
+#        powershell -ExecutionPolicy Bypass -File scripts/Ensure-STM32CubeFrameworkLink.ps1
+#      The first PlatformIO build copies stm32h7xx_hal_conf.h into that pack — run once:
+#        py -m platformio run -e nucleo_h753zi
+#
+# PlatformIO stays the canonical CI/build in platformio.ini; this file is for Cube-style IDE workflows.
+#
+target: PAT_nucleo_h753zi
+language: C
+optimization: Os
+
+targetMCU: stm32h7x
+cpu: cortex-m7
+fpu: fpv5-d16
+floatAbi: "-mfloat-abi=hard"
+
+ldscript: cube/linker/STM32H753ZITx_FLASH.ld
+
+cDefinitions:
+  - STM32H7
+  - STM32H7xx
+  - STM32H753xx
+  - USE_HAL_DRIVER
+
+cxxDefinitions: []
+asDefinitions: []
+
+cFlags:
+  - -Wall
+  - -ffunction-sections
+  - -fdata-sections
+
+cxxFlags: []
+assemblyFlags: []
+
+linkerFlags:
+  - -specs=nano.specs
+
+libraries:
+  - c
+  - m
+
+excludes:
+  - "**/Examples/**"
+  - "**/examples/**"
+  - "**/Example/**"
+  - "**/example/**"
+
+includeDirectories:
+  - framework-stm32cubeh7/Drivers/CMSIS/Include
+  - framework-stm32cubeh7/Drivers/CMSIS/Device/ST/STM32H7xx/Include
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Inc
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy
+  - include
+  - src
+
+sourceFiles:
+  - framework-stm32cubeh7/Drivers/CMSIS/Device/ST/STM32H7xx/Source/Templates/gcc/startup_stm32h753xx.s
+  - framework-stm32cubeh7/Drivers/CMSIS/Device/ST/STM32H7xx/Source/Templates/system_stm32h7xx.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash.c
+  - framework-stm32cubeh7/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash_ex.c
+  - extras/minimal_led_main.c
+  - src/stm32h7xx_it.c
+
+customMakefileRules: []

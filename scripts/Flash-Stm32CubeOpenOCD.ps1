@@ -1,29 +1,27 @@
-# Flash pat_nucleo_h753.elf using OpenOCD (same tool PlatformIO uses). Requires ST-Link + OpenOCD on PATH.
+#Requires -Version 5.1
 param(
-    [string]$Elf = ""
+  [string]$Elf = ""
 )
 $ErrorActionPreference = "Stop"
-$repo = Split-Path $PSScriptRoot -Parent
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Elf) {
-    $bd = Join-Path $repo "cmake-build"
-    $Elf = Join-Path $bd "pat_nucleo_h753.elf"
-    if (-not (Test-Path $Elf)) {
-        $Elf = Join-Path $bd "pat_nucleo_h753"
-    }
+  $Elf = Join-Path $RepoRoot "cmake-build\pat_nucleo_h753.elf"
 }
+
 if (-not (Test-Path $Elf)) {
-    Write-Error "Build ELF not found - run scripts\Build-Stm32CubeCMake.ps1 first."
+  Write-Error "ELF not found: $Elf — run Build-Stm32CubeCMake.ps1 first"
 }
+
 $openocdExe = $null
-$cmd = Get-Command openocd.exe -ErrorAction SilentlyContinue
-if ($cmd) { $openocdExe = $cmd.Source }
+$cmdOcd = Get-Command openocd -ErrorAction SilentlyContinue
+if ($cmdOcd) { $openocdExe = $cmdOcd.Path }
 if (-not $openocdExe) {
-    $pioOpenocd = Join-Path $env:USERPROFILE ".platformio\packages\tool-openocd\bin\openocd.exe"
-    if (Test-Path $pioOpenocd) { $openocdExe = $pioOpenocd }
+  $pioOcd = Join-Path $env:USERPROFILE ".platformio\packages\tool-openocd\bin\openocd.exe"
+  if (Test-Path $pioOcd) { $openocdExe = $pioOcd }
 }
-if (-not $openocdExe) {
-    Write-Error "openocd not on PATH and not found under PlatformIO packages."
-}
-$elfArg = $Elf -replace '\\', '/'
-$ocdCmd = ('program "{0}" verify reset exit' -f $elfArg)
-& $openocdExe -f interface/stlink.cfg -f target/stm32h7x.cfg -c $ocdCmd
+if (-not $openocdExe) { Write-Error "openocd not on PATH and not under PlatformIO packages" }
+
+$elfAbs = (Resolve-Path $Elf).Path
+$elfEsc = $elfAbs -replace '\\','/'
+$cmd = "program `"$elfEsc`" verify reset exit"
+& $openocdExe -f interface/stlink.cfg -f target/stm32h7x.cfg -c $cmd

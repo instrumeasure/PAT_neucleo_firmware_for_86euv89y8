@@ -1,7 +1,9 @@
+/** Default app: single SPI4 + ADS127L11 (logical ch3). Reference: examples/single-channel-spi4-ads127/README.md */
 #include "stm32h7xx_hal.h"
 #include "pat_clock.h"
 #include "ads127l11.h"
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 UART_HandleTypeDef huart3;
@@ -61,7 +63,7 @@ static void MX_SPI4_Init(void)
   hspi4.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi4.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi4.Init.NSS = SPI_NSS_SOFT;
-  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi4.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi4.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi4.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -147,16 +149,21 @@ int main(void)
 
   MX_SPI4_Init();
   ads127_pins_init();
-  /* PE11=!CS: SPI frames are only ~8 µs @ 2 MHz SCLK — easy to miss on LA; slow pulse proves GPIO. */
+  /* PE11=!CS: SPI frames are short on LA; slow pulse proves GPIO before bringup. */
   printf("LA: 12 ms active-low !CS pulse on PE11 (then bringup SPI).\r\n");
   ads127_cs_probe_pulse_ms(12u);
 
   uint32_t spi_ker_hz = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI4);
-  uint32_t f_sclk_hz = spi_ker_hz >> 5u; /* /32 prescaler */
+  /* Must match MX_SPI4_Init() BaudRatePrescaler (_8 → divide kernel clock by 8). */
+  const uint32_t spi4_presc = 8u;
+  uint32_t f_sclk_hz = spi_ker_hz / spi4_presc;
 
   printf("\r\nPAT Milestone 1 - SPI4 ADS127L11 logical ch3 + USART3\r\n");
-  printf("SYSCLK_Hz=%lu SPI4_kernel_Hz=%lu f_SCLK_hz~%lu (presc/32)\r\n",
-         (unsigned long)SystemCoreClock, (unsigned long)spi_ker_hz, (unsigned long)f_sclk_hz);
+  printf("SYSCLK_Hz=%lu SPI4_kernel_Hz=%lu f_SCLK_hz~%lu (presc/%lu)\r\n",
+         (unsigned long)SystemCoreClock,
+         (unsigned long)spi_ker_hz,
+         (unsigned long)f_sclk_hz,
+         (unsigned long)spi4_presc);
 
   ads127_shadow_t sh;
   ads127_diag_t dg;
@@ -192,9 +199,25 @@ int main(void)
          (unsigned)rs, (unsigned long)dg.drdy_timeouts, (unsigned)dg.drdy_skipped_arm_high,
          samp[0], samp[1], samp[2]);
 
+  /* Continuous conversions: each iteration blocks on DRDY then clocks 24b — rate follows ADC ODR.
+   * Log and LED toggle ~1 Hz only so UART does not starve the read loop. */
+  uint32_t log_ms = HAL_GetTick();
   for (;;) {
-    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-    printf("tick %lu ms\r\n", (unsigned long)HAL_GetTick());
-    HAL_Delay(1000);
+    rs = ads127_read_sample24_blocking(&hspi4, samp, 10u, &dg);
+    uint32_t now = HAL_GetTick();
+    if ((now - log_ms) >= 1000u) {
+      log_ms = now;
+      HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
+      uint32_t u24 =
+          ((uint32_t)samp[0] << 16) | ((uint32_t)samp[1] << 8) | (uint32_t)samp[2];
+      int32_t s24 = (int32_t)((u24 << 8) >> 8);
+      printf("ADC,ch3,tick_ms=%lu,raw24=0x%06lX,sdec=%ld,st=%u,to=%lu,arm_skip=%u\r\n",
+             (unsigned long)now,
+             (unsigned long)(u24 & 0xFFFFFFu),
+             (long)s24,
+             (unsigned)rs,
+             (unsigned long)dg.drdy_timeouts,
+             (unsigned)dg.drdy_skipped_arm_high);
+    }
   }
 }

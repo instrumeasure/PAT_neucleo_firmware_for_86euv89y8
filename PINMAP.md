@@ -69,6 +69,17 @@
 
 Firmware smoke image (this branch): CMake target **`pat_nucleo_spi6`** — 64-byte SPI6 slave IT, USART3 heartbeat. Flash `cmake-build/pat_nucleo_spi6.elf` when exercising J2 (default **`pat_nucleo_h753.elf`** is still SPI4 + ADS127 milestone).
 
+### SPI6 test frame (`pat_nucleo_spi6`, 64 bytes per NSS burst)
+
+After each completed 64-byte transfer, the slave builds the **next** TX buffer from [`spi6_test_frame_fill`](include/spi6_test_frame.h) (`src/spi6_test_frame.c`):
+
+| Offset | Content |
+|--------|---------|
+| 0–3 | `uint32_t` sequence **LE** = `completed_frame_index + 1` (1-based count since boot). Before the first master burst, idle fill uses **0xFFFFFFFF**. |
+| 4 | Test format tag **0xA5** (not production QPD **0x02**). |
+| 5–7 | First three bytes **MOSI** from the master on the transfer that just completed (`rx[0..2]`). |
+| 8–63 | `tx[i] = (uint8_t)(seq ^ (i * 0x1D))` with `seq` as above. |
+
 ## Debug / status
 
 | Function | MCU pin |

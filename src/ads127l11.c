@@ -33,6 +33,22 @@ static void delay_short(void)
   }
 }
 
+/* ≥100 ns after !CS before sampling SDO/DRDY; ~48× __NOP @ ≥400 MHz is nominally ≥100 ns. */
+static void delay_after_cs_100ns(void)
+{
+  for (volatile uint32_t i = 0; i < 48u; i++) {
+    __NOP();
+  }
+}
+
+static inline uint32_t miso_line_high_raw(void)
+{
+  return (PORT_MISO_LINE->IDR & (uint32_t)PIN_MISO) != 0u ? 1u : 0u;
+}
+
+/* Only call HAL_GetTick every (mask+1) polls — tick dominates loop time vs IDR read. */
+#define MISO_POLL_TICK_MASK 0x1FFu
+
 void ads127_pins_init(void)
 {
   __HAL_RCC_GPIOE_CLK_ENABLE();
@@ -256,40 +272,28 @@ HAL_StatusTypeDef ads127_read_sample24_blocking(
     ads127_diag_t *dg)
 {
   const uint32_t t0 = HAL_GetTick();
-  /* Poll MISO / SDO–DRDY while CS low, no SCLK (method 1).
-   * Arm: wait for line HIGH first (idle / DRDY deassert) so we do not treat “stuck low” float as ready. */
+  /* !CS = 0 → ≥100 ns settle → wait DRDY (MISO low) → SCLK only inside TransmitReceive. No arm-high phase. */
   cs_low();
-  delay_short();
+  delay_after_cs_100ns();
   dg->drdy_skipped_arm_high = 0u;
   {
-    const uint32_t arm_ms = 3u;
-    uint32_t ta = HAL_GetTick();
-    while (HAL_GPIO_ReadPin(PORT_MISO_LINE, PIN_MISO) != GPIO_PIN_SET) {
-      if ((HAL_GetTick() - ta) > arm_ms) {
-        dg->drdy_skipped_arm_high = 1u;
+    uint32_t iter = 0u;
+    for (;;) {
+      if (miso_line_high_raw() == 0u) {
         break;
       }
-    }
-  }
-  for (;;) {
-    GPIO_PinState s = HAL_GPIO_ReadPin(PORT_MISO_LINE, PIN_MISO);
-    if (s == GPIO_PIN_RESET) {
-      break;
-    }
-    if ((HAL_GetTick() - t0) > timeout_ms) {
-      cs_high();
-      dg->drdy_timeouts++;
-      return HAL_TIMEOUT;
-    }
-    for (volatile uint32_t w = 0; w < 50u; w++) {
-      __NOP();
+      iter++;
+      if ((iter & MISO_POLL_TICK_MASK) == 0u && (HAL_GetTick() - t0) > timeout_ms) {
+        cs_high();
+        dg->drdy_timeouts++;
+        return HAL_TIMEOUT;
+      }
     }
   }
 
   uint8_t tx[3] = { 0, 0, 0 };
   uint8_t rx[3];
   HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(hspi, tx, rx, 3u, 200u);
-  delay_short();
   cs_high();
   if (st == HAL_OK) {
     out24[0] = rx[0];

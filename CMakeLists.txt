@@ -114,6 +114,7 @@ add_custom_command(TARGET pat_nucleo_h753 POST_BUILD
 # SPI6 J2 slave smoke test (separate ELF; flash with Flash-Stm32CubeOpenOCD.ps1 -Elf .../pat_nucleo_spi6.elf)
 set(APP_SPI6_SRC
   "${CMAKE_SOURCE_DIR}/src/main_spi6.c"
+  "${CMAKE_SOURCE_DIR}/src/spi6_test_frame.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"

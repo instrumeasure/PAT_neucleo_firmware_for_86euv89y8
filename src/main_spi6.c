@@ -1,23 +1,27 @@
 /**
- * SPI6 slave bring-up (J2): 64-byte IT double-buffer style echo.
+ * SPI6 slave bring-up (J2): 64-byte IT; TX payload regenerated after each master transfer.
  * Build: cmake --build <build-dir> --target pat_nucleo_spi6
  * Flash:  Flash-Stm32CubeOpenOCD.ps1 -Elf cmake-build/pat_nucleo_spi6.elf
  */
 #include "stm32h7xx_hal.h"
 #include "pat_clock.h"
+#include "spi6_test_frame.h"
 #include <stdio.h>
 #include <string.h>
-
-#define SPI6_FRAME_N 64U
 
 UART_HandleTypeDef huart3;
 SPI_HandleTypeDef hspi6;
 
-static uint8_t s_tx[SPI6_FRAME_N];
-static uint8_t s_rx[SPI6_FRAME_N];
+static uint8_t s_tx[SPI6_TEST_FRAME_N];
+static uint8_t s_rx[SPI6_TEST_FRAME_N];
 
 volatile uint32_t g_spi6_txrx_complete_count;
 volatile uint32_t g_spi6_error_count;
+
+/** Snapshot for USART heartbeat (written from completion callback only). */
+volatile uint32_t g_hb_last_completed_idx;
+volatile uint8_t g_hb_tx0, g_hb_tx1, g_hb_tx2, g_hb_tx3, g_hb_tx4;
+volatile uint8_t g_hb_rx0, g_hb_rx1, g_hb_rx2;
 
 void Error_Handler(void);
 
@@ -96,14 +100,29 @@ void SPI6_IRQHandler(void)
   HAL_SPI_IRQHandler(&hspi6);
 }
 
+static void spi6_snapshot_for_hb(uint32_t completed_idx)
+{
+  g_hb_last_completed_idx = completed_idx;
+  g_hb_tx0 = s_tx[0];
+  g_hb_tx1 = s_tx[1];
+  g_hb_tx2 = s_tx[2];
+  g_hb_tx3 = s_tx[3];
+  g_hb_tx4 = s_tx[4];
+  g_hb_rx0 = s_rx[0];
+  g_hb_rx1 = s_rx[1];
+  g_hb_rx2 = s_rx[2];
+}
+
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
   if (hspi != &hspi6) {
     return;
   }
+  uint32_t done_idx = g_spi6_txrx_complete_count;
   g_spi6_txrx_complete_count++;
-  /* Re-arm with same TX pattern; host data visible in s_rx for debug. */
-  (void)HAL_SPI_TransmitReceive_IT(&hspi6, s_tx, s_rx, SPI6_FRAME_N);
+  spi6_test_frame_fill(s_tx, s_rx, done_idx);
+  spi6_snapshot_for_hb(done_idx);
+  (void)HAL_SPI_TransmitReceive_IT(&hspi6, s_tx, s_rx, SPI6_TEST_FRAME_N);
 }
 
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
@@ -112,7 +131,9 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
     return;
   }
   g_spi6_error_count++;
-  (void)HAL_SPI_TransmitReceive_IT(&hspi6, s_tx, s_rx, SPI6_FRAME_N);
+  spi6_test_frame_fill(s_tx, NULL, SPI6_TEST_FRAME_INDEX_IDLE);
+  spi6_snapshot_for_hb(SPI6_TEST_FRAME_INDEX_IDLE);
+  (void)HAL_SPI_TransmitReceive_IT(&hspi6, s_tx, s_rx, SPI6_TEST_FRAME_N);
 }
 
 void Error_Handler(void)
@@ -134,26 +155,35 @@ int main(void)
 
   {
     static const char kBoot[] =
-        "\r\nPAT: SPI6 slave (J2) PA5/PG8/PG12/PG14 AF8, 64B IT. USART3 115200.\r\n";
+        "\r\nPAT: SPI6 slave (J2) test payload after each 64B master xfer. USART3 115200.\r\n";
     (void)HAL_UART_Transmit(&huart3, (uint8_t *)kBoot, (uint16_t)(sizeof(kBoot) - 1U), 500U);
   }
 
-  memset(s_tx, 0x5AU, sizeof(s_tx));
   memset(s_rx, 0U, sizeof(s_rx));
+  spi6_test_frame_fill(s_tx, NULL, SPI6_TEST_FRAME_INDEX_IDLE);
+  spi6_snapshot_for_hb(SPI6_TEST_FRAME_INDEX_IDLE);
 
   MX_SPI6_Slave_Init();
 
-  if (HAL_SPI_TransmitReceive_IT(&hspi6, s_tx, s_rx, SPI6_FRAME_N) != HAL_OK) {
+  if (HAL_SPI_TransmitReceive_IT(&hspi6, s_tx, s_rx, SPI6_TEST_FRAME_N) != HAL_OK) {
     printf("HAL_SPI_TransmitReceive_IT start failed\r\n");
     Error_Handler();
   }
 
   for (;;) {
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-    printf("HB spi6_frames=%lu err=%lu rx0=%02X\r\n",
+    printf("HB frames=%lu err=%lu done_idx=%lu tx[0..4]=%02X%02X%02X%02X%02X rx[0..2]=%02X%02X%02X\r\n",
            (unsigned long)g_spi6_txrx_complete_count,
            (unsigned long)g_spi6_error_count,
-           (unsigned)s_rx[0]);
+           (unsigned long)g_hb_last_completed_idx,
+           (unsigned)g_hb_tx0,
+           (unsigned)g_hb_tx1,
+           (unsigned)g_hb_tx2,
+           (unsigned)g_hb_tx3,
+           (unsigned)g_hb_tx4,
+           (unsigned)g_hb_rx0,
+           (unsigned)g_hb_rx1,
+           (unsigned)g_hb_rx2);
     HAL_Delay(1000);
   }
 }

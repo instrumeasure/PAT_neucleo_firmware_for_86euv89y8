@@ -72,4 +72,11 @@ rules_skills[path,role]
 .cursor/skills/stm32cube-hal-model/SKILL.md,HAL model UM2217 MspInit State
 ```
 
+```toon
+example_ref[single SPI4 + ADS127L11 ch3]
+readme,examples/single-channel-spi4-ads127/README.md
+index,examples/README.md
+elf,cmake-build/pat_nucleo_h753.elf|APP_SRC main.c in root CMakeLists.txt
+```
+
 Overlap: **schematics + `src/` win** over this file and over rules.

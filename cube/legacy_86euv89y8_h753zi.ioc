@@ -42,7 +42,7 @@ SPI2.Mode=Full-Duplex Master
 SPI2.IPParameters=VirtualType
 SPI2.VirtualType=VM_MASTER
 PB10.Signal=SPI2_SCK
-PB14.Signal=SPI2_MISO
+PC2.Signal=SPI2_MISO
 PB15.Signal=SPI2_MOSI
 
 SPI3.Mode=Full-Duplex Master

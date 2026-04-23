@@ -1,14 +1,15 @@
 #include "ads127l11.h"
+#include "pat_pinmap.h"
 
-/* PINMAP ch3 */
-#define PORT_CS   GPIOE
-#define PIN_CS    GPIO_PIN_11
-#define PORT_RST  GPIOF
-#define PIN_RST   GPIO_PIN_0
-#define PORT_START GPIOF
-#define PIN_START GPIO_PIN_1
-#define PORT_MISO_LINE GPIOE
-#define PIN_MISO       GPIO_PIN_13
+/* Logical channel 3 — must match PAT_PINMAP_SPI4_* */
+#define PORT_CS    PAT_PINMAP_SPI4_NCS_PORT
+#define PIN_CS     PAT_PINMAP_SPI4_NCS_PIN
+#define PORT_RST   PAT_PINMAP_ADS127_NRESET_PORT
+#define PIN_RST    PAT_PINMAP_ADS127_NRESET_PIN
+#define PORT_START PAT_PINMAP_ADS127_START_PORT
+#define PIN_START  PAT_PINMAP_ADS127_START_PIN
+#define PORT_MISO_LINE PAT_PINMAP_SPI4_MISO_PORT
+#define PIN_MISO       PAT_PINMAP_SPI4_MISO_PIN
 
 /* SBAS946 td(RSSC) ≥ 10000·t_CLK @ 25 MHz mod CLK → 400 µs; use margin for first SPI. */
 #define TD_RSSC_MS 5u

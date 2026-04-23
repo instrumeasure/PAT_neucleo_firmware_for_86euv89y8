@@ -1,4 +1,5 @@
 #include "stm32h7xx_hal.h"
+#include "pat_clock.h"
 #include "ads127l11.h"
 #include <stdio.h>
 #include <string.h>
@@ -131,8 +132,8 @@ static void pat_print_ads127_fault_mask(uint32_t m)
 int main(void)
 {
   HAL_Init();
-  SystemCoreClockUpdate();
-  HAL_InitTick(TICK_INT_PRIORITY);
+  /* PLL + SysTick reload (stm32h7-hal-pitfalls: tick after clock change). */
+  PAT_SystemClock_Config();
 
   MX_GPIO_LED_Init();
   MX_USART3_UART_Init();
@@ -166,7 +167,7 @@ int main(void)
   printf("ads127_bringup=%d fault_mask=0x%08lX\r\n", br, (unsigned long)dg.fault_mask);
   pat_print_ads127_fault_mask(dg.fault_mask);
   if (br != 0 || dg.fault_mask != 0u) {
-    printf("ADS127: verify J1 ch3 wiring (PE11 !CS, PE6/12/13 SPI4, PF0 nRESET, PF1 START), HAT power, and 25 MHz modulator CLK to the ADC.\r\n");
+    printf("ADS127: verify J1 ch3 wiring (PE11 !CS, PE12 SCK, PE6 MOSI, PE13 MISO, PF0 nRESET, PF1 START), HAT power, and 25 MHz modulator CLK to the ADC.\r\n");
   }
   printf("shadow 00-08: %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
          sh.dev_id, sh.rev_id, sh.status, sh.control, sh.mux,

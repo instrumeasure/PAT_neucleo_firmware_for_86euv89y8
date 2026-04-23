@@ -3,6 +3,17 @@
 **Board:** NUCLEO-H753ZI  
 **HAT MCU link:** **J1** (ADC HAT) and **J2** (inter-HAT SPI). This map matches revision **86euv89y8** only; **86ex5v90x** swaps START/RESET vs `!ADC_EN` on J1 — do not mix semantics.
 
+**Locked SPI1–4 routing (authoritative in firmware):** `include/pat_pinmap.h` — change GPIO/AF there and keep this document + `cube/legacy_86euv89y8_h753zi.ioc` aligned.
+
+## J1 — SPI summary (!CS, SCK, MOSI, MISO)
+
+| SPI# | !CS | SCK | MOSI | MISO (SDO / !DRDY) |
+|------|-----|-----|------|---------------------|
+| SPI1 | **PA4** | **PG11** | **PD7** | **PG9** |
+| SPI2 | **PB4** | **PB10** | **PB15** | **PC2** |
+| SPI3 | **PA15** | **PC10** | **PD6** | **PC11** |
+| SPI4 | **PE11** | **PE12** | **PE6** | **PE13** |
+
 ## J1 — shared control + four independent SPI buses (ADS127L11)
 
 | Function | MCU pin | HAT / note |
@@ -27,7 +38,7 @@
 | !CS (GPIO) | **PB4** | — |
 | SCK | **PB10** | AF5 SPI2 |
 | MOSI | **PB15** | AF5 SPI2 |
-| MISO / SDO (DRDY poll pad) | **PB14** | AF5 SPI2 |
+| MISO / SDO (DRDY poll pad) | **PC2** | AF5 SPI2 |
 
 ### Channel 2 — SPI3
 
@@ -35,16 +46,16 @@
 |--------|---------|-----|
 | !CS (GPIO) | **PA15** | — |
 | SCK | **PC10** | AF6 SPI3 |
-| MISO / SDO (DRDY poll on same pad) | **PC11** | AF6 SPI3 |
 | MOSI | **PD6** | AF5 SPI3 |
+| MISO / SDO (DRDY poll on same pad) | **PC11** | AF6 SPI3 |
 
 ### Channel 3 — SPI4
 
 | Signal | MCU pin | AF |
 |--------|---------|-----|
 | !CS (GPIO) | **PE11** | — |
-| SCK | **PE6** | AF5 SPI4 |
-| MOSI | **PE12** | AF5 SPI4 |
+| SCK | **PE12** | AF5 SPI4 |
+| MOSI | **PE6** | AF5 SPI4 |
 | MISO / SDO (DRDY poll pad) | **PE13** | AF5 SPI4 |
 
 ## J2 — SPI6 slave (QPD / host), AF8
@@ -72,7 +83,9 @@ Prior working image used: **SPI1–4 IRQ = 3**, **TIM6_DAC = 4**, **SPI6 = 6** (
 
 ## Machine-readable pinout
 
-STM32CubeMX project: **`cube/legacy_86euv89y8_h753zi.ioc`** — authoritative when it disagrees with this table.
+- **`include/pat_pinmap.h`** — SPI1–4 + shared START/RESET (used by firmware).
+- **`src/stm32h7xx_hal_msp.c`** — `HAL_SPI_MspInit` / `HAL_SPI_MspDeInit` for SPI1–4 and USART3 (single implementation; do not duplicate in other `.c` files).
+- **`cube/legacy_86euv89y8_h753zi.ioc`** — Cube snapshot; keep in sync when changing AF routing.
 
 ## References
 

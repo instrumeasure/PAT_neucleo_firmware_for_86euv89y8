@@ -17,7 +17,7 @@ if (-not $Elf) {
 }
 
 if (-not (Test-Path $Elf)) {
-  Write-Error "ELF not found (tried pat_nucleo_h753.elf and pat_nucleo_h753): $Elf — run Build-Stm32CubeCMake.ps1 first"
+  Write-Error "ELF not found (tried pat_nucleo_h753.elf and pat_nucleo_h753): $Elf - run Build-Stm32CubeCMake.ps1 first"
 }
 
 $openocdExe = $null
@@ -30,8 +30,8 @@ if (-not $openocdExe) {
 if (-not $openocdExe) { Write-Error "openocd not on PATH and not under PlatformIO packages" }
 
 $elfAbs = (Resolve-Path $Elf).Path
-$elfEsc = $elfAbs -replace '\\','/'
-$cmd = "program `"$elfEsc`" verify reset exit"
+$elfEsc = $elfAbs -replace '\\', '/'
+$cmd = 'program "' + $elfEsc + '" verify reset exit'
 & $openocdExe -f interface/stlink.cfg -f target/stm32h7x.cfg -c $cmd
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE

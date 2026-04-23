@@ -7,5 +7,12 @@ void SysTick_Handler(void)
 
 void HardFault_Handler(void)
 {
-  while (1) { }
+  /* Halt debugger if attached; otherwise spins (see stm32h7-hal-pitfalls). */
+#if defined(__ARMCC_VERSION)
+  __breakpoint(0);
+#elif defined(__GNUC__)
+  __asm volatile("bkpt #0");
+#endif
+  while (1) {
+  }
 }

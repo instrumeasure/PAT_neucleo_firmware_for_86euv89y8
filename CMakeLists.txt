@@ -49,6 +49,7 @@ add_compile_definitions(
 )
 
 include_directories(
+  "${CMAKE_SOURCE_DIR}/include"
   "${CMAKE_SOURCE_DIR}/src"
   "${CUBE}/Drivers/CMSIS/Include"
   "${DEVICE_DIR}/Include"
@@ -82,6 +83,7 @@ set(CMSIS_SRC
 
 set(APP_SRC
   "${CMAKE_SOURCE_DIR}/src/main.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"

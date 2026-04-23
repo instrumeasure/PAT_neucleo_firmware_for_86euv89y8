@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include "stm32h7xx_hal.h"
+#include "pat_clock.h"
+#include "pat_pinmap.h"
 #include "ads127l11.h"
 #include "ads127l11_hal_stm32.h"
 
@@ -9,7 +11,6 @@ SPI_HandleTypeDef hspi3;
 SPI_HandleTypeDef hspi4;
 UART_HandleTypeDef huart3;
 
-static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
@@ -17,7 +18,7 @@ static void MX_SPI3_Init(void);
 static void MX_SPI4_Init(void);
 static void MX_USART3_UART_Init(void);
 static void bind_ads127_interfaces(void);
-static void Error_Handler(void);
+void Error_Handler(void);
 
 int _write(int file, char *ptr, int len)
 {
@@ -37,7 +38,7 @@ int main(void)
     ads127_device_t ads[ADS127_SYNC_CHANNELS];
 
     HAL_Init();
-    SystemClock_Config();
+    PAT_SystemClock_Config();
     MX_GPIO_Init();
     MX_SPI1_Init();
     MX_SPI2_Init();
@@ -107,12 +108,12 @@ static void bind_ads127_interfaces(void)
     ADS127_HAL_BindSpi(2U, &hspi3);
     ADS127_HAL_BindSpi(3U, &hspi4);
 
-    ADS127_HAL_SetCsPin(0U, GPIOA, GPIO_PIN_4);
-    ADS127_HAL_SetCsPin(1U, GPIOB, GPIO_PIN_4);
-    ADS127_HAL_SetCsPin(2U, GPIOA, GPIO_PIN_15);
-    ADS127_HAL_SetCsPin(3U, GPIOE, GPIO_PIN_11);
-    ADS127_HAL_SetStartPin(GPIOF, GPIO_PIN_1);
-    ADS127_HAL_SetResetPin(GPIOF, GPIO_PIN_0);
+    ADS127_HAL_SetCsPin(0U, PAT_PINMAP_SPI1_NCS_PORT, PAT_PINMAP_SPI1_NCS_PIN);
+    ADS127_HAL_SetCsPin(1U, PAT_PINMAP_SPI2_NCS_PORT, PAT_PINMAP_SPI2_NCS_PIN);
+    ADS127_HAL_SetCsPin(2U, PAT_PINMAP_SPI3_NCS_PORT, PAT_PINMAP_SPI3_NCS_PIN);
+    ADS127_HAL_SetCsPin(3U, PAT_PINMAP_SPI4_NCS_PORT, PAT_PINMAP_SPI4_NCS_PIN);
+    ADS127_HAL_SetStartPin(PAT_PINMAP_ADS127_START_PORT, PAT_PINMAP_ADS127_START_PIN);
+    ADS127_HAL_SetResetPin(PAT_PINMAP_ADS127_NRESET_PORT, PAT_PINMAP_ADS127_NRESET_PIN);
 }
 
 static void MX_SPI1_Init(void)
@@ -151,6 +152,7 @@ static void MX_SPI2_Init(void)
 {
     hspi2 = hspi1;
     hspi2.Instance = SPI2;
+    hspi2.State = HAL_SPI_STATE_RESET;
     if (HAL_SPI_Init(&hspi2) != HAL_OK)
     {
         Error_Handler();
@@ -161,6 +163,7 @@ static void MX_SPI3_Init(void)
 {
     hspi3 = hspi1;
     hspi3.Instance = SPI3;
+    hspi3.State = HAL_SPI_STATE_RESET;
     if (HAL_SPI_Init(&hspi3) != HAL_OK)
     {
         Error_Handler();
@@ -171,6 +174,7 @@ static void MX_SPI4_Init(void)
 {
     hspi4 = hspi1;
     hspi4.Instance = SPI4;
+    hspi4.State = HAL_SPI_STATE_RESET;
     if (HAL_SPI_Init(&hspi4) != HAL_OK)
     {
         Error_Handler();
@@ -207,157 +211,34 @@ static void MX_GPIO_Init(void)
     __HAL_RCC_GPIOF_CLK_ENABLE();
     __HAL_RCC_GPIOG_CLK_ENABLE();
 
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4 | GPIO_PIN_15, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOE, GPIO_PIN_11, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(PAT_PINMAP_SPI1_NCS_PORT,
+                      PAT_PINMAP_SPI1_NCS_PIN | PAT_PINMAP_SPI3_NCS_PIN,
+                      GPIO_PIN_SET);
+    HAL_GPIO_WritePin(PAT_PINMAP_SPI2_NCS_PORT, PAT_PINMAP_SPI2_NCS_PIN, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(PAT_PINMAP_SPI4_NCS_PORT, PAT_PINMAP_SPI4_NCS_PIN, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(PAT_PINMAP_ADS127_NRESET_PORT,
+                      PAT_PINMAP_ADS127_NRESET_PIN | PAT_PINMAP_ADS127_START_PIN,
+                      GPIO_PIN_SET);
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0 | GPIO_PIN_7, GPIO_PIN_RESET);
 
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
 
-    GPIO_InitStruct.Pin = GPIO_PIN_4 | GPIO_PIN_15;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    GPIO_InitStruct.Pin = PAT_PINMAP_SPI1_NCS_PIN | PAT_PINMAP_SPI3_NCS_PIN;
+    HAL_GPIO_Init(PAT_PINMAP_SPI1_NCS_PORT, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = GPIO_PIN_4 | GPIO_PIN_0 | GPIO_PIN_7;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    GPIO_InitStruct.Pin = PAT_PINMAP_SPI2_NCS_PIN | GPIO_PIN_0 | GPIO_PIN_7;
+    HAL_GPIO_Init(PAT_PINMAP_SPI2_NCS_PORT, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = GPIO_PIN_11;
-    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+    GPIO_InitStruct.Pin = PAT_PINMAP_SPI4_NCS_PIN;
+    HAL_GPIO_Init(PAT_PINMAP_SPI4_NCS_PORT, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1;
-    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+    GPIO_InitStruct.Pin = PAT_PINMAP_ADS127_NRESET_PIN | PAT_PINMAP_ADS127_START_PIN;
+    HAL_GPIO_Init(PAT_PINMAP_ADS127_NRESET_PORT, &GPIO_InitStruct);
 }
 
-void HAL_SPI_MspInit(SPI_HandleTypeDef *spiHandle)
-{
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    if (spiHandle->Instance == SPI1)
-    {
-        __HAL_RCC_SPI1_CLK_ENABLE();
-
-        GPIO_InitStruct.Pin = GPIO_PIN_7;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
-        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-
-        GPIO_InitStruct.Pin = GPIO_PIN_9 | GPIO_PIN_11;
-        HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
-    }
-    else if (spiHandle->Instance == SPI2)
-    {
-        __HAL_RCC_SPI2_CLK_ENABLE();
-
-        GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_14 | GPIO_PIN_15;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
-        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-    }
-    else if (spiHandle->Instance == SPI3)
-    {
-        __HAL_RCC_SPI3_CLK_ENABLE();
-
-        GPIO_InitStruct.Pin = GPIO_PIN_10 | GPIO_PIN_11;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF6_SPI3;
-        HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-        GPIO_InitStruct.Pin = GPIO_PIN_6;
-        GPIO_InitStruct.Alternate = GPIO_AF5_SPI3;
-        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-    }
-    else if (spiHandle->Instance == SPI4)
-    {
-        __HAL_RCC_SPI4_CLK_ENABLE();
-
-        GPIO_InitStruct.Pin = GPIO_PIN_6 | GPIO_PIN_12 | GPIO_PIN_13;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-        GPIO_InitStruct.Alternate = GPIO_AF5_SPI4;
-        HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-    }
-}
-
-void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
-{
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    if (uartHandle->Instance == USART3)
-    {
-        __HAL_RCC_USART3_CLK_ENABLE();
-
-        GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
-        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
-        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-        GPIO_InitStruct.Alternate = GPIO_AF7_USART3;
-        HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
-    }
-}
-
-static void SystemClock_Config(void)
-{
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-    HAL_PWREx_ConfigSupply(PWR_LDO_SUPPLY);
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-    while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY))
-    {
-    }
-
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-    RCC_OscInitStruct.PLL.PLLM = 4;
-    RCC_OscInitStruct.PLL.PLLN = 50;
-    RCC_OscInitStruct.PLL.PLLP = 2;
-    RCC_OscInitStruct.PLL.PLLQ = 2;
-    RCC_OscInitStruct.PLL.PLLR = 2;
-    RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
-    RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
-    RCC_OscInitStruct.PLL.PLLFRACN = 0;
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
-                                  RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2 |
-                                  RCC_CLOCKTYPE_D3PCLK1 | RCC_CLOCKTYPE_D1PCLK1;
-    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-    RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
-    RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV2;
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
-    RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
-
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    SystemCoreClockUpdate();
-
-    if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
-    {
-        Error_Handler();
-    }
-}
-
-static void Error_Handler(void)
+void Error_Handler(void)
 {
     while (1)
     {

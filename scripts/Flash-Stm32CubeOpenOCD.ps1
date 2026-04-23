@@ -5,11 +5,19 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Elf) {
-  $Elf = Join-Path $RepoRoot "cmake-build\pat_nucleo_h753.elf"
+  $ElfElf = Join-Path $RepoRoot "cmake-build\pat_nucleo_h753.elf"
+  $ElfBare = Join-Path $RepoRoot "cmake-build\pat_nucleo_h753"
+  if (Test-Path $ElfElf) {
+    $Elf = $ElfElf
+  } elseif (Test-Path $ElfBare) {
+    $Elf = $ElfBare
+  } else {
+    $Elf = $ElfElf
+  }
 }
 
 if (-not (Test-Path $Elf)) {
-  Write-Error "ELF not found: $Elf — run Build-Stm32CubeCMake.ps1 first"
+  Write-Error "ELF not found (tried pat_nucleo_h753.elf and pat_nucleo_h753): $Elf — run Build-Stm32CubeCMake.ps1 first"
 }
 
 $openocdExe = $null
@@ -25,3 +33,6 @@ $elfAbs = (Resolve-Path $Elf).Path
 $elfEsc = $elfAbs -replace '\\','/'
 $cmd = "program `"$elfEsc`" verify reset exit"
 & $openocdExe -f interface/stlink.cfg -f target/stm32h7x.cfg -c $cmd
+if ($LASTEXITCODE -ne 0) {
+  exit $LASTEXITCODE
+}

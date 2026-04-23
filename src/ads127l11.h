@@ -34,6 +34,8 @@ typedef struct {
   uint32_t fault_mask;
   uint32_t drdy_timeouts;
   uint32_t last_sample_u32_be;
+  /** Set if MISO looked idle-low before DRDY arm (likely float / wrong phase). */
+  uint8_t drdy_skipped_arm_high;
 } ads127_diag_t;
 
 void ads127_pins_init(void);

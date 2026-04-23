@@ -90,13 +90,19 @@ int main(void)
   MX_USART3_UART_Init();
   setvbuf(stdout, NULL, _IONBF, 0);
 
+  /* Raw TX so a terminal opened any time after reset still sees life (no printf dependency). */
+  {
+    static const uint8_t kBoot[] = "\r\nPAT: USART3 alive (115200 8N1 PD8/PD9). Reset Nucleo to see full log.\r\n";
+    (void)HAL_UART_Transmit(&huart3, kBoot, (uint16_t)(sizeof(kBoot) - 1u), 500u);
+  }
+
   MX_SPI4_Init();
   ads127_pins_init();
 
   uint32_t spi_ker_hz = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI4);
   uint32_t f_sclk_hz = spi_ker_hz >> 5u; /* /32 prescaler */
 
-  printf("\r\nPAT Milestone 1 — SPI4 ADS127L11 logical ch3 + USART3\r\n");
+  printf("\r\nPAT Milestone 1 - SPI4 ADS127L11 logical ch3 + USART3\r\n");
   printf("SYSCLK_Hz=%lu SPI4_kernel_Hz=%lu f_SCLK_hz~%lu (presc/32)\r\n",
          (unsigned long)SystemCoreClock, (unsigned long)spi_ker_hz, (unsigned long)f_sclk_hz);
 
@@ -107,6 +113,9 @@ int main(void)
 
   int br = ads127_bringup(&hspi4, &sh, &dg);
   printf("ads127_bringup=%d fault_mask=0x%08lX\r\n", br, (unsigned long)dg.fault_mask);
+  if (br != 0 || dg.fault_mask != 0u) {
+    printf("ADS127: verify J1 ch3 wiring (PE11 !CS, PE6/12/13 SPI4, PF0 nRESET, PF1 START), HAT power, and 25 MHz modulator CLK to the ADC.\r\n");
+  }
   printf("shadow 00-08: %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
          sh.dev_id, sh.rev_id, sh.status, sh.control, sh.mux,
          sh.config1, sh.config2, sh.config3, sh.config4);
@@ -126,11 +135,13 @@ int main(void)
 
   uint8_t samp[3] = {0};
   HAL_StatusTypeDef rs = ads127_read_sample24_blocking(&hspi4, samp, 10u, &dg);
-  printf("sample24 st=%u drdy_timeouts=%lu B=%02X%02X%02X\r\n",
-         (unsigned)rs, (unsigned long)dg.drdy_timeouts, samp[0], samp[1], samp[2]);
+  printf("sample24 st=%u drdy_timeouts=%lu drdy_arm_skip=%u B=%02X%02X%02X\r\n",
+         (unsigned)rs, (unsigned long)dg.drdy_timeouts, (unsigned)dg.drdy_skipped_arm_high,
+         samp[0], samp[1], samp[2]);
 
   for (;;) {
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-    HAL_Delay(500);
+    printf("tick %lu ms\r\n", (unsigned long)HAL_GetTick());
+    HAL_Delay(1000);
   }
 }

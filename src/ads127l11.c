@@ -150,6 +150,7 @@ int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *
     dg->fault_mask |= 1u << 0;
     return -1;
   }
+  /* 00h == ADS127L11 is valid; floating MISO also reads 00h — do not treat !=0 as only error. */
   if (v != 0x00u) {
     dg->fault_mask |= 1u << 1;
     err = -2;
@@ -167,6 +168,16 @@ int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *
     if (ads127_wreg(hspi, ADS127_REG_CONFIG4, c4_new) != HAL_OK) {
       dg->fault_mask |= 1u << 3;
       err = -4;
+    } else {
+      uint8_t c4_rb = 0;
+      if (ads127_rreg(hspi, ADS127_REG_CONFIG4, &c4_rb) != HAL_OK) {
+        dg->fault_mask |= 1u << 9;
+        err = -4;
+      } else if ((c4_rb & 0x80u) == 0u) {
+        /* No CLK_SEL readback — bus open / wrong CS / no device. */
+        dg->fault_mask |= 1u << 10;
+        err = -4;
+      }
     }
   }
 
@@ -181,6 +192,12 @@ int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *
   if (ads127_wreg(hspi, ADS127_REG_CONFIG2, c2_new) != HAL_OK) {
     dg->fault_mask |= 1u << 5;
     err = -6;
+  } else {
+    uint8_t c2_rb = 0;
+    if (ads127_rreg(hspi, ADS127_REG_CONFIG2, &c2_rb) == HAL_OK && ((c2_rb & 0x20u) == 0u)) {
+      dg->fault_mask |= 1u << 11;
+      err = -6;
+    }
   }
 
   uint8_t c3;
@@ -193,9 +210,22 @@ int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *
   if (ads127_wreg(hspi, ADS127_REG_CONFIG3, 0x03u) != HAL_OK) {
     dg->fault_mask |= 1u << 7;
     err = -8;
+  } else {
+    uint8_t c3_rb = 0;
+    if (ads127_rreg(hspi, ADS127_REG_CONFIG3, &c3_rb) == HAL_OK && ((c3_rb & 0x1Fu) != 0x03u)) {
+      dg->fault_mask |= 1u << 12;
+      err = -8;
+    }
   }
 
   (void)ads127_shadow_refresh(hspi, sh);
+  /* POR STATUS is typically not 00h; all-zero shadow strongly suggests floating MISO. */
+  if (sh->dev_id == 0u && sh->rev_id == 0u && sh->status == 0u && sh->config4 == 0u) {
+    dg->fault_mask |= 1u << 13;
+    if (err == 0) {
+      err = -10;
+    }
+  }
   return err;
 }
 
@@ -206,12 +236,23 @@ HAL_StatusTypeDef ads127_read_sample24_blocking(
     ads127_diag_t *dg)
 {
   const uint32_t t0 = HAL_GetTick();
-  /* Poll MISO / SDO–DRDY while CS low, no SCLK (method 1). */
+  /* Poll MISO / SDO–DRDY while CS low, no SCLK (method 1).
+   * Arm: wait for line HIGH first (idle / DRDY deassert) so we do not treat “stuck low” float as ready. */
   cs_low();
   delay_short();
+  dg->drdy_skipped_arm_high = 0u;
+  {
+    const uint32_t arm_ms = 3u;
+    uint32_t ta = HAL_GetTick();
+    while (HAL_GPIO_ReadPin(PORT_MISO_LINE, PIN_MISO) != GPIO_PIN_SET) {
+      if ((HAL_GetTick() - ta) > arm_ms) {
+        dg->drdy_skipped_arm_high = 1u;
+        break;
+      }
+    }
+  }
   for (;;) {
     GPIO_PinState s = HAL_GPIO_ReadPin(PORT_MISO_LINE, PIN_MISO);
-    /* Heuristic: treat pin low as “ready to clock” (tune vs LA / STATUS DRDY). */
     if (s == GPIO_PIN_RESET) {
       break;
     }

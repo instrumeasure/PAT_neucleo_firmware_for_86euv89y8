@@ -57,7 +57,7 @@ USART3 **PD8/PD9** → ST-Link VCP **115200**.
 ```toon
 heartbeat[CSV per line ending CRLF ~1Hz]
 HB,state,tick_ms,quartets_ok,raw0,raw1,raw2,raw3
-quartets_ok,successful quartet batches since boot ads127_get_quartet_acquired_count()
+quartets_ok,successful full quartet epochs since boot `ads127_get_quartet_acquired_count()` in [`src/ads127l11.c`](src/ads127l11.c) (increments only when `ads127_read_quartet_blocking` returns `HAL_OK`; used by `pat_nucleo_quartet` path; default `main.c` heartbeat may omit)
 raw_n,0x+6hex 24-bit|sentinel 0xFFFFFF invalid|same as printf in heartbeat_tick()
 states,INIT ADC_CFG RUN ERR_SPI ERR_ADC|strings from app_state.c
 ```

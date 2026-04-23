@@ -7,6 +7,7 @@
  */
 #include "stm32h7xx_hal.h"
 #include "pat_clock.h"
+#include "pat_spi_ads127.h"
 #include "ads127l11.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -64,47 +65,6 @@ static void MX_USART3_UART_Init(void)
   }
 }
 
-/**
- * SPI1–3: SPI123 kernel often 400 MHz; /64 ~6.25 MHz SCLK (was /32 ~12.5 MHz). SPI4 kernel 100 MHz; /16 ~6.25 MHz (was /8).
- */
-static uint32_t mx_spi_prescaler_for_instance(const SPI_TypeDef *instance)
-{
-  if (instance == SPI4) {
-    return SPI_BAUDRATEPRESCALER_16;
-  }
-  return SPI_BAUDRATEPRESCALER_64;
-}
-
-static void MX_SPI_ApplyTemplate(SPI_HandleTypeDef *hs, SPI_TypeDef *instance)
-{
-  memset(hs, 0, sizeof(*hs));
-  hs->Instance = instance;
-  hs->Init.Mode = SPI_MODE_MASTER;
-  hs->Init.Direction = SPI_DIRECTION_2LINES;
-  hs->Init.DataSize = SPI_DATASIZE_8BIT;
-  hs->Init.CLKPolarity = SPI_POLARITY_LOW;
-  hs->Init.CLKPhase = SPI_PHASE_2EDGE;
-  hs->Init.NSS = SPI_NSS_SOFT;
-  hs->Init.BaudRatePrescaler = mx_spi_prescaler_for_instance(instance);
-  hs->Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hs->Init.TIMode = SPI_TIMODE_DISABLE;
-  hs->Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hs->Init.CRCPolynomial = 0x7U;
-  hs->Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
-  hs->Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
-  hs->Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
-  hs->Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-  hs->Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-  hs->Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
-  hs->Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
-  hs->Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-  hs->Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
-  hs->Init.IOSwap = SPI_IO_SWAP_DISABLE;
-  if (HAL_SPI_Init(hs) != HAL_OK) {
-    Error_Handler();
-  }
-}
-
 typedef struct {
   SPI_TypeDef *instance;
   unsigned log_ch;
@@ -125,7 +85,9 @@ static void run_one_phase(const spi_bus_phase_t *ph)
   ads127_start_set(0);
   HAL_Delay(3u);
 
-  MX_SPI_ApplyTemplate(&hspi, ph->instance);
+  if (pat_spi_ads127_apply_template(&hspi, ph->instance) != HAL_OK) {
+    Error_Handler();
+  }
   const uint32_t phase_t0_ms = HAL_GetTick();
 
   uint32_t spi_ker_hz;

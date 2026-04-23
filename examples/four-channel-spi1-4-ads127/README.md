@@ -30,7 +30,14 @@ All four **`!CS`** lines are configured as **GPIO outputs, idle high** in **`ads
 
 ## SPI init parity
 
-`main_quartet.c` uses one **template** for **`SPI_InitTypeDef`** on **SPI1–SPI4** (CPOL/CPHA, prescaler, FIFO, NSS soft, etc.); only **`Instance`** differs. Each handle is **zero-initialised** before **`HAL_SPI_Init`** so **`HAL_SPI_MspInit`** runs per peripheral (see **stm32cube-hal-model** skill).
+Shared helper **[`pat_spi_ads127.c`](../../src/pat_spi_ads127.c)** / **[`include/pat_spi_ads127.h`](../../include/pat_spi_ads127.h)** applies one **template** for **`SPI_InitTypeDef`** on **SPI1–SPI4** (CPOL/CPHA, prescaler, FIFO, NSS soft, etc.); only **`Instance`** differs. Each handle is **zero-initialised** before **`HAL_SPI_Init`** so **`HAL_SPI_MspInit`** runs per peripheral (see **stm32cube-hal-model** skill).
+
+## Epoch cache and UART (machine-readable)
+
+- **Published epoch line:** [`include/pat_quartet_epoch.h`](../../include/pat_quartet_epoch.h) — `pat_quartet_epoch_line_t` (32-byte aligned `raw24[4][3]` + `epoch_id` / `valid`) for downstream batched processing.
+- **Boot / bring-up:** `BRU`, `SH`, `TI`, `STAT` CSV-style lines (see `pat_quartet_app.c`).
+- **Runtime (throttled, default `PAT_QUARTET_SYNC_SUMMARY_MS` 1000 ms):** `CNT`, `EPOCH` (includes `span_us` from DWT cycle delta), `CH` per channel with `st` / `to` / `arm_skip`. **`summary_ms` is UART cadence only**, not ADC ODR. Optional burst: define **`PAT_QUARTET_SYNC_BURST_EPOCHS`** > 0 at compile time.
+- **Tier B DMA (not enabled):** checklist header [`include/pat_quartet_p4_dma.h`](../../include/pat_quartet_p4_dma.h).
 
 ## API
 

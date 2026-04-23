@@ -1,6 +1,7 @@
 #include "ads127l11.h"
 #include "pat_pinmap.h"
 #include <stdio.h>
+#include <string.h>
 
 #define PORT_RST   PAT_PINMAP_ADS127_NRESET_PORT
 #define PIN_RST    PAT_PINMAP_ADS127_NRESET_PIN
@@ -582,6 +583,13 @@ HAL_StatusTypeDef ads127_read_sample24_blocking(
   return ads127_read_sample24_ch_blocking(&ch, out24, timeout_ms, dg);
 }
 
+static uint32_t ads127_quartet_acquired_count;
+
+uint32_t ads127_get_quartet_acquired_count(void)
+{
+  return ads127_quartet_acquired_count;
+}
+
 HAL_StatusTypeDef ads127_read_quartet_blocking(
     ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],
     uint8_t out24[ADS127_QUARTET_CHANNELS][3],
@@ -592,8 +600,15 @@ HAL_StatusTypeDef ads127_read_quartet_blocking(
     HAL_StatusTypeDef st =
         ads127_read_sample24_ch_blocking(&ctxs[i], out24[i], timeout_ms, &dg[i]);
     if (st != HAL_OK) {
+      for (unsigned k = i + 1u; k < ADS127_QUARTET_CHANNELS; k++) {
+        out24[k][0] = 0xFFu;
+        out24[k][1] = 0xFFu;
+        out24[k][2] = 0xFFu;
+        memset(&dg[k], 0, sizeof(dg[k]));
+      }
       return st;
     }
   }
+  ads127_quartet_acquired_count++;
   return HAL_OK;
 }

@@ -5,6 +5,7 @@
  */
 #include "stm32h7xx_hal.h"
 #include "pat_clock.h"
+#include "pat_spi_ads127.h"
 #include "ads127l11.h"
 #include <stdio.h>
 #include <stdint.h>
@@ -93,42 +94,9 @@ static void MX_USART3_UART_Init(void)
   }
 }
 
-static uint32_t mx_spi_prescaler(void)
-{
-#if PAT_ADS127_SINGLE_SPI_BUS == 4
-  return SPI_BAUDRATEPRESCALER_16;
-#else
-  return SPI_BAUDRATEPRESCALER_64;
-#endif
-}
-
 static void MX_SPI_Init(void)
 {
-  memset(&hspi, 0, sizeof(hspi));
-  hspi.Instance = PAT_SPI_INSTANCE;
-  hspi.Init.Mode = SPI_MODE_MASTER;
-  hspi.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi.Init.CLKPhase = SPI_PHASE_2EDGE;
-  hspi.Init.NSS = SPI_NSS_SOFT;
-  hspi.Init.BaudRatePrescaler = mx_spi_prescaler();
-  hspi.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi.Init.CRCPolynomial = 0x7U;
-  hspi.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
-  hspi.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
-  hspi.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
-  hspi.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-  hspi.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-  hspi.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
-  hspi.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
-  hspi.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-  /* SPI1–4: keep AF pad behaviour when SPE=0 so DRDY poll on MISO sees the slave (same H7 issue class as SPI2 PC2). */
-  hspi.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
-  hspi.Init.IOSwap = SPI_IO_SWAP_DISABLE;
-  if (HAL_SPI_Init(&hspi) != HAL_OK) {
+  if (pat_spi_ads127_apply_template(&hspi, PAT_SPI_INSTANCE) != HAL_OK) {
     Error_Handler();
   }
 }

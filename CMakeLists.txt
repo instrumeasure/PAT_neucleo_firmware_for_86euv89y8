@@ -94,6 +94,7 @@ set(CMSIS_SRC
 set(APP_SRC
   "${CMAKE_SOURCE_DIR}/src/main.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -156,6 +157,9 @@ add_custom_command(TARGET pat_nucleo_spi6 POST_BUILD
 set(APP_QUARTET_SRC
   "${CMAKE_SOURCE_DIR}/src/main_quartet.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_quartet_epoch.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_quartet_app.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -188,6 +192,7 @@ add_custom_command(TARGET pat_nucleo_quartet POST_BUILD
 set(APP_SPI1_4_SCAN_SRC
   "${CMAKE_SOURCE_DIR}/src/main_spi1_4_scan.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -220,6 +225,7 @@ add_custom_command(TARGET pat_nucleo_spi1_4_scan POST_BUILD
 set(APP_SINGLE_ADS127_SPI_SRC
   "${CMAKE_SOURCE_DIR}/src/main_single_ads127_spi.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"

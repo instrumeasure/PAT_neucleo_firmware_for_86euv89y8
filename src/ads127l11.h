@@ -128,11 +128,19 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
 /**
  * One epoch: SPI1→SPI2→SPI3→SPI4 per AGENTS. Fills out24[ch][3]; updates dg[ch] per channel.
  * Returns first non-HAL_OK status, or HAL_OK if all four succeed.
+ *
+ * **Partial epoch contract:** On non-HAL_OK return at channel index `i`, indices `< i` contain
+ * this attempt’s data; indices `> i` are set to **0xFF** in all three bytes; `dg[k]` for `k > i`
+ * are zero-cleared. Channel `i` may contain partial data depending where failure occurred inside
+ * `ads127_read_sample24_ch_blocking`.
  */
 HAL_StatusTypeDef ads127_read_quartet_blocking(
     ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],
     uint8_t out24[ADS127_QUARTET_CHANNELS][3],
     uint32_t timeout_ms,
     ads127_diag_t dg[ADS127_QUARTET_CHANNELS]);
+
+/** Successful full quartet epochs (all four `HAL_OK`) since boot; for telemetry / AGENTS heartbeat. */
+uint32_t ads127_get_quartet_acquired_count(void);
 
 #endif

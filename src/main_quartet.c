@@ -5,9 +5,18 @@
 #include "stm32h7xx_hal.h"
 #include "pat_clock.h"
 #include "ads127l11.h"
+#include "pat_spi_ads127.h"
+#include "pat_quartet_app.h"
+#include "pat_quartet_epoch.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+
+#if PAT_QUARTET_SYNC_BURST_EPOCHS > 0u
+#define PAT_QUARTET_BURST_ENABLED 1
+#else
+#define PAT_QUARTET_BURST_ENABLED 0
+#endif
 
 UART_HandleTypeDef huart3;
 SPI_HandleTypeDef hspi1;
@@ -63,52 +72,20 @@ static void MX_USART3_UART_Init(void)
   }
 }
 
-/** SPI4: kernel /16 ~6.25 MHz SCLK (same idea as `main.c`). SPI1–3: SPI123 kernel often 400 MHz; /64 ~6.25 MHz (was /32). */
-static uint32_t mx_spi_prescaler_for_instance(const SPI_TypeDef *instance)
-{
-  if (instance == SPI4) {
-    return SPI_BAUDRATEPRESCALER_16;
-  }
-  return SPI_BAUDRATEPRESCALER_64;
-}
-
-static void MX_SPI_ApplyTemplate(SPI_HandleTypeDef *hspi, SPI_TypeDef *instance)
-{
-  memset(hspi, 0, sizeof(*hspi));
-  hspi->Instance = instance;
-  hspi->Init.Mode = SPI_MODE_MASTER;
-  hspi->Init.Direction = SPI_DIRECTION_2LINES;
-  hspi->Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi->Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi->Init.CLKPhase = SPI_PHASE_2EDGE;
-  hspi->Init.NSS = SPI_NSS_SOFT;
-  hspi->Init.BaudRatePrescaler = mx_spi_prescaler_for_instance(instance);
-  hspi->Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi->Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi->Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi->Init.CRCPolynomial = 0x7U;
-  hspi->Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
-  hspi->Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
-  hspi->Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
-  hspi->Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-  hspi->Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-  hspi->Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
-  hspi->Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
-  hspi->Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-  /* SPI1–4: keep IO state when SPE=0 so DRDY MISO poll sees the pad (STM32H7). */
-  hspi->Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
-  hspi->Init.IOSwap = SPI_IO_SWAP_DISABLE;
-  if (HAL_SPI_Init(hspi) != HAL_OK) {
-    Error_Handler();
-  }
-}
-
 static void MX_SPI_All_Init(void)
 {
-  MX_SPI_ApplyTemplate(&hspi1, SPI1);
-  MX_SPI_ApplyTemplate(&hspi2, SPI2);
-  MX_SPI_ApplyTemplate(&hspi3, SPI3);
-  MX_SPI_ApplyTemplate(&hspi4, SPI4);
+  if (pat_spi_ads127_apply_template(&hspi1, SPI1) != HAL_OK) {
+    Error_Handler();
+  }
+  if (pat_spi_ads127_apply_template(&hspi2, SPI2) != HAL_OK) {
+    Error_Handler();
+  }
+  if (pat_spi_ads127_apply_template(&hspi3, SPI3) != HAL_OK) {
+    Error_Handler();
+  }
+  if (pat_spi_ads127_apply_template(&hspi4, SPI4) != HAL_OK) {
+    Error_Handler();
+  }
 }
 
 static void quartet_bind(ads127_ch_ctx_t ctx[ADS127_QUARTET_CHANNELS])
@@ -119,10 +96,27 @@ static void quartet_bind(ads127_ch_ctx_t ctx[ADS127_QUARTET_CHANNELS])
   ads127_ch_ctx_bind(&ctx[3u], 3u, &hspi4);
 }
 
+static void dwt_cycle_counter_enable(void)
+{
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static uint32_t cycles_to_us_u32(uint32_t cyc)
+{
+  if (SystemCoreClock == 0u) {
+    return 0u;
+  }
+  const uint64_t us = ((uint64_t)cyc * 1000000ULL) / (uint64_t)SystemCoreClock;
+  return (us > 0xFFFFFFFFu) ? 0xFFFFFFFFu : (uint32_t)us;
+}
+
 int main(void)
 {
   HAL_Init();
   PAT_SystemClock_Config();
+  dwt_cycle_counter_enable();
 
   MX_GPIO_LED_Init();
   MX_USART3_UART_Init();
@@ -134,7 +128,6 @@ int main(void)
     (void)HAL_UART_Transmit(&huart3, kBoot, (uint16_t)(sizeof(kBoot) - 1u), 500u);
   }
 
-  /* All !CS outputs idle high before any SPI (see ads127_pins_init). */
   ads127_pins_init();
   MX_SPI_All_Init();
 
@@ -150,6 +143,8 @@ int main(void)
            (unsigned long)(k4 / 16u));
   }
 
+  pat_quartet_app_print_sync_debug_boot();
+
   ads127_shadow_t sh[ADS127_QUARTET_CHANNELS];
   ads127_diag_t dg_bringup[ADS127_QUARTET_CHANNELS];
   int br_ch[ADS127_QUARTET_CHANNELS];
@@ -159,51 +154,13 @@ int main(void)
   memset(dg_bringup, 0, sizeof(dg_bringup));
   memset(br_ch, 0, sizeof(br_ch));
 
-  {
-    unsigned all_ok = 0u;
-    for (unsigned attempt = 0u; attempt < 2u; attempt++) {
-      if (attempt > 0u) {
-        printf("\r\nQuartet bring-up retry after nRESET...\r\n");
-        ads127_nreset_pulse();
-        HAL_Delay(15u);
-      } else {
-        ads127_nreset_pulse();
-        HAL_Delay(5u);
-      }
-      all_ok = 1u;
-      for (unsigned c = 0u; c < ADS127_QUARTET_CHANNELS; c++) {
-        int br = ads127_bringup(hs[c], &sh[c], &dg_bringup[c]);
-        br_ch[c] = br;
-        printf("ch%u ads127_bringup=%d fault_mask=0x%08lX\r\n",
-               (unsigned)c, br, (unsigned long)dg_bringup[c].fault_mask);
-        ads127_print_fault_mask(dg_bringup[c].fault_mask);
-        printf(
-            "ch%u shadow 00-08: %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-            (unsigned)c,
-            sh[c].dev_id,
-            sh[c].rev_id,
-            sh[c].status,
-            sh[c].control,
-            sh[c].mux,
-            sh[c].config1,
-            sh[c].config2,
-            sh[c].config3,
-            sh[c].config4);
-        if (!ads127_bringup_ok(br, dg_bringup[c].fault_mask)) {
-          all_ok = 0u;
-        }
-      }
-      if (all_ok != 0u) {
-        break;
-      }
-    }
-    if (all_ok == 0u) {
+  const unsigned all_ok = pat_quartet_app_bringup_retry_all(hs, sh, dg_bringup, br_ch);
+  if (all_ok == 0u) {
 #ifdef PAT_ADS127_STRICT_BRINGUP
-      ads127_halt_streaming_fault("Quartet: one or more channels failed bring-up after nRESET retry.");
+    ads127_halt_streaming_fault("Quartet: one or more channels failed bring-up after nRESET retry.");
 #else
-      printf("WARNING: quartet bring-up incomplete; START and epoch will run (strict bring-up OFF).\r\n");
+    printf("WARNING: quartet bring-up incomplete; START and epoch will run (strict bring-up OFF).\r\n");
 #endif
-    }
   }
 
   ads127_start_set(1);
@@ -218,27 +175,14 @@ int main(void)
     }
   }
 #else
-  {
-    unsigned gate_fail = 0u;
-    for (unsigned c = 0u; c < ADS127_QUARTET_CHANNELS; c++) {
-      if (!ads127_bringup_ok(br_ch[c], dg_bringup[c].fault_mask)) {
-        printf("WARNING ch%u: skip post-START gate (bring-up not clean).\r\n", (unsigned)c);
-        continue;
-      }
-      int pg = ads127_post_start_gate(hs[c], &sh[c]);
-      if (pg != 0) {
-        printf("WARNING ch%u post_start_gate=%d; continuing.\r\n", (unsigned)c, pg);
-        gate_fail = 1u;
-      }
-    }
-    if (gate_fail != 0u) {
-      ads127_after_failed_post_start_gate();
-    }
-  }
+  pat_quartet_app_post_start_gates_nonstrict(hs, sh, br_ch, dg_bringup);
 #endif
 
   ads127_ch_ctx_t ctx[ADS127_QUARTET_CHANNELS];
   quartet_bind(ctx);
+
+  pat_quartet_epoch_line_t epoch_line;
+  memset(&epoch_line, 0, sizeof(epoch_line));
 
   ads127_diag_t dg_epoch[ADS127_QUARTET_CHANNELS];
   memset(dg_epoch, 0, sizeof(dg_epoch));
@@ -248,9 +192,13 @@ int main(void)
       ads127_read_quartet_blocking(ctx, samp, QUARTET_DRDY_TIMEOUT_MS, dg_epoch);
   if (rs != HAL_OK) {
     memset(samp, 0xFF, sizeof(samp));
+  } else {
+    pat_quartet_epoch_line_publish(&epoch_line, samp);
   }
-  /* One line per channel: long single-line logs often truncate on VCP / terminal buffers. */
-  printf("first quartet st=%u (SPI1->4)\r\n", (unsigned)rs);
+
+  printf("first quartet st=%u (SPI1->4) quartets_ok_total=%lu\r\n",
+         (unsigned)rs,
+         (unsigned long)ads127_get_quartet_acquired_count());
   for (unsigned c = 0u; c < ADS127_QUARTET_CHANNELS; c++) {
     printf("  ch%u to=%lu arm_skip=%u raw=%02X%02X%02X\r\n",
            (unsigned)c,
@@ -262,28 +210,83 @@ int main(void)
   }
 
   uint32_t log_ms = HAL_GetTick();
+  uint32_t log_epoch_seq = 0u;
+  uint32_t burst_done = 0u;
+  uint32_t quartet_fail_total = 0u;
+
   for (;;) {
     memset(dg_epoch, 0, sizeof(dg_epoch));
+    const uint32_t t0_ms = HAL_GetTick();
+    const uint32_t c0 = DWT->CYCCNT;
+    log_epoch_seq++;
+
     rs = ads127_read_quartet_blocking(ctx, samp, QUARTET_DRDY_TIMEOUT_MS, dg_epoch);
+    const uint32_t c1 = DWT->CYCCNT;
+    const uint32_t t1_ms = HAL_GetTick();
+    const uint32_t span_us = cycles_to_us_u32(c1 - c0);
+
     if (rs != HAL_OK) {
-      /* Do not leave stale raw bytes when an early channel fails (HAL_TIMEOUT=3). */
       memset(samp, 0xFF, sizeof(samp));
+      pat_quartet_epoch_line_invalidate(&epoch_line);
+      quartet_fail_total++;
+    } else {
+      pat_quartet_epoch_line_publish(&epoch_line, samp);
     }
-    uint32_t now = HAL_GetTick();
-    if ((now - log_ms) >= 1000u) {
+
+    const uint32_t now = HAL_GetTick();
+#if PAT_QUARTET_BURST_ENABLED
+    const unsigned burst_active = (burst_done < PAT_QUARTET_SYNC_BURST_EPOCHS) ? 1u : 0u;
+#else
+    const unsigned burst_active = 0u;
+#endif
+
+    const int do_summary =
+        burst_active || ((now - log_ms) >= PAT_QUARTET_SYNC_SUMMARY_MS);
+    if (burst_active) {
+      burst_done++;
+    }
+    if (do_summary && !burst_active) {
       log_ms = now;
+    }
+
+    if (do_summary) {
       HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-      printf("epoch tick_ms=%lu st=%u\r\n", (unsigned long)now, (unsigned)rs);
+      const uint32_t qok = ads127_get_quartet_acquired_count();
+      const uint32_t samples_24b_ok = qok * 4u;
+      printf("CNT,tick_ms=%lu,epoch_seq=%lu,quartets_ok_total=%lu,samples_24b_ok_total=%lu,quartet_fail_total=%lu\r\n",
+             (unsigned long)now,
+             (unsigned long)log_epoch_seq,
+             (unsigned long)qok,
+             (unsigned long)samples_24b_ok,
+             (unsigned long)quartet_fail_total);
+
+      const unsigned ok_mask = (rs == HAL_OK) ? 0x0Fu : 0u;
+      const HAL_StatusTypeDef st_all = rs;
+
+      printf("EPOCH,epoch_seq=%lu,t_start_ms=%lu,t_end_ms=%lu,span_us=%lu,st_all=%u,ok_mask=%u,quartets_ok_total=%lu\r\n",
+             (unsigned long)log_epoch_seq,
+             (unsigned long)t0_ms,
+             (unsigned long)t1_ms,
+             (unsigned long)span_us,
+             (unsigned)st_all,
+             ok_mask,
+             (unsigned long)qok);
+
       for (unsigned c = 0u; c < ADS127_QUARTET_CHANNELS; c++) {
-        uint32_t u24 = ((uint32_t)samp[c][0] << 16) | ((uint32_t)samp[c][1] << 8) | (uint32_t)samp[c][2];
-        int32_t s24 = (int32_t)((u24 & 0xFFFFFFu) << 8) >> 8;
-        printf("  ch%u raw24=0x%06lX sdec=%ld to=%lu arm=%u\r\n",
+        uint32_t u24 =
+            ((uint32_t)samp[c][0] << 16) | ((uint32_t)samp[c][1] << 8) | (uint32_t)samp[c][2];
+        int32_t s24 = pat_quartet_sign_extend_u24(u24);
+        printf("CH,epoch_seq=%lu,ch=%u,tick_ms=%lu,raw24_hex=%06lX,sdec=%ld,st=%u,to=%lu,arm_skip=%u\r\n",
+               (unsigned long)log_epoch_seq,
                (unsigned)c,
+               (unsigned long)now,
                (unsigned long)(u24 & 0xFFFFFFu),
                (long)s24,
+               (unsigned)(uint8_t)rs,
                (unsigned long)dg_epoch[c].drdy_timeouts,
                (unsigned)dg_epoch[c].drdy_skipped_arm_high);
       }
+
     }
   }
 }

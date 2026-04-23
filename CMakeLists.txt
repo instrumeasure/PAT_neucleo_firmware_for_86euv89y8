@@ -110,3 +110,33 @@ add_custom_command(TARGET pat_nucleo_h753 POST_BUILD
           $<TARGET_FILE_DIR:pat_nucleo_h753>/pat_nucleo_h753.bin
   COMMAND ${CMAKE_SIZE} $<TARGET_FILE:pat_nucleo_h753>
 )
+
+# SPI6 J2 slave smoke test (separate ELF; flash with Flash-Stm32CubeOpenOCD.ps1 -Elf .../pat_nucleo_spi6.elf)
+set(APP_SPI6_SRC
+  "${CMAKE_SOURCE_DIR}/src/main_spi6.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
+  "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
+  "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
+)
+
+add_executable(pat_nucleo_spi6
+  ${CMSIS_SRC}
+  ${HAL_SRC}
+  ${APP_SPI6_SRC}
+)
+
+target_link_options(pat_nucleo_spi6 PRIVATE
+  ${CPU_FLAGS}
+  -T${LINKER_SCRIPT}
+  -Wl,--gc-sections
+  -Wl,-Map=$<TARGET_FILE_DIR:pat_nucleo_spi6>/pat_nucleo_spi6.map
+  --specs=nano.specs
+  --specs=nosys.specs
+  -Wl,--print-memory-usage
+)
+
+add_custom_command(TARGET pat_nucleo_spi6 POST_BUILD
+  COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:pat_nucleo_spi6>
+          $<TARGET_FILE_DIR:pat_nucleo_spi6>/pat_nucleo_spi6.bin
+  COMMAND ${CMAKE_SIZE} $<TARGET_FILE:pat_nucleo_spi6>
+)

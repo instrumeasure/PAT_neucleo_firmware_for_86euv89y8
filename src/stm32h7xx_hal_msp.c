@@ -50,6 +50,17 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
     gpio.Pin = PAT_PINMAP_SPI4_AF_PINS;
     gpio.Alternate = PAT_PINMAP_SPI4_AF;
     HAL_GPIO_Init(PAT_PINMAP_SPI4_SCK_PORT, &gpio);
+  } else if (hspi->Instance == SPI6) {
+    __HAL_RCC_SPI6_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOG_CLK_ENABLE();
+
+    gpio.Pin = PAT_PINMAP_SPI6_SCK_PIN;
+    gpio.Alternate = PAT_PINMAP_SPI6_AF;
+    HAL_GPIO_Init(PAT_PINMAP_SPI6_SCK_PORT, &gpio);
+
+    gpio.Pin = PAT_PINMAP_SPI6_GPIOG_AF_PINS;
+    HAL_GPIO_Init(PAT_PINMAP_SPI6_NSS_PORT, &gpio);
   }
 }
 
@@ -73,6 +84,10 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef *hspi)
   } else if (hspi->Instance == SPI4) {
     HAL_GPIO_DeInit(PAT_PINMAP_SPI4_SCK_PORT, PAT_PINMAP_SPI4_AF_PINS);
     __HAL_RCC_SPI4_CLK_DISABLE();
+  } else if (hspi->Instance == SPI6) {
+    HAL_GPIO_DeInit(PAT_PINMAP_SPI6_SCK_PORT, PAT_PINMAP_SPI6_SCK_PIN);
+    HAL_GPIO_DeInit(PAT_PINMAP_SPI6_NSS_PORT, PAT_PINMAP_SPI6_GPIOG_AF_PINS);
+    __HAL_RCC_SPI6_CLK_DISABLE();
   }
 }
 

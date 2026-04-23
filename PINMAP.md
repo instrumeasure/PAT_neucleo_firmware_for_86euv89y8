@@ -67,6 +67,8 @@
 | MISO (out) | **PG12** | AF8 SPI6 |
 | MOSI (in) | **PG14** | AF8 SPI6 |
 
+Firmware smoke image (this branch): CMake target **`pat_nucleo_spi6`** — 64-byte SPI6 slave IT, USART3 heartbeat. Flash `cmake-build/pat_nucleo_spi6.elf` when exercising J2 (default **`pat_nucleo_h753.elf`** is still SPI4 + ADS127 milestone).
+
 ## Debug / status
 
 | Function | MCU pin |

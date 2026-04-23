@@ -17,7 +17,7 @@ if (-not $Elf) {
 }
 
 if (-not (Test-Path $Elf)) {
-  Write-Error "ELF not found (tried pat_nucleo_h753.elf and pat_nucleo_h753): $Elf - run Build-Stm32CubeCMake.ps1 first"
+  Write-Error "ELF not found: $Elf - run Build-Stm32CubeCMake.ps1 first. SPI6 image: -Elf cmake-build\pat_nucleo_spi6.elf"
 }
 
 $openocdExe = $null

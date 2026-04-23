@@ -80,4 +80,20 @@
 #define PAT_PINMAP_SPI4_AF_PINS \
   (PAT_PINMAP_SPI4_SCK_PIN | PAT_PINMAP_SPI4_MOSI_PIN | PAT_PINMAP_SPI4_MISO_PIN)
 
+/* ------------------------------------------------------------------ */
+/* SPI6 — J2 inter-HAT slave (host is master), AF8                     */
+/* ------------------------------------------------------------------ */
+
+#define PAT_PINMAP_SPI6_SCK_PORT   GPIOA
+#define PAT_PINMAP_SPI6_SCK_PIN    GPIO_PIN_5
+#define PAT_PINMAP_SPI6_NSS_PORT   GPIOG
+#define PAT_PINMAP_SPI6_NSS_PIN    GPIO_PIN_8
+#define PAT_PINMAP_SPI6_MISO_PORT  GPIOG
+#define PAT_PINMAP_SPI6_MISO_PIN   GPIO_PIN_12
+#define PAT_PINMAP_SPI6_MOSI_PORT  GPIOG
+#define PAT_PINMAP_SPI6_MOSI_PIN   GPIO_PIN_14
+#define PAT_PINMAP_SPI6_AF         GPIO_AF8_SPI6
+#define PAT_PINMAP_SPI6_GPIOG_AF_PINS \
+  (PAT_PINMAP_SPI6_NSS_PIN | PAT_PINMAP_SPI6_MISO_PIN | PAT_PINMAP_SPI6_MOSI_PIN)
+
 #endif /* PAT_PINMAP_H */

@@ -10,7 +10,7 @@
 | SPI# | !CS | SCK | MOSI | MISO (SDO / !DRDY) |
 |------|-----|-----|------|---------------------|
 | SPI1 | **PA4** | **PG11** | **PD7** | **PG9** |
-| SPI2 | **PB4** | **PB10** | **PB15** | **PC2** |
+| SPI2 | **PB4** | **PB10** | **PB15** | **PC2** (CubeMX **PC2_C**) |
 | SPI3 | **PA15** | **PC10** | **PD6** | **PC11** |
 | SPI4 | **PE11** | **PE12** | **PE6** | **PE13** |
 
@@ -38,7 +38,9 @@
 | !CS (GPIO) | **PB4** | — |
 | SCK | **PB10** | AF5 SPI2 |
 | MOSI | **PB15** | AF5 SPI2 |
-| MISO / SDO (DRDY poll pad) | **PC2** | AF5 SPI2 |
+| MISO / SDO (DRDY poll pad) | **PC2** (CubeMX **PC2_C**) | AF5 SPI2 |
+
+**MCU note (STM32H753):** On **STM32CubeMX** this package pin is often named **PC2_C** (dual-pad / analog-switch); in **HAL/CMSIS** it is still **PC2** on **GPIOC** (`GPIO_PIN_2`) — same ball. Firmware sets **`SYSCFG_PMCR.PC2SO`** in `ads127_pins_init()` so the external ball is switched for digital SPI (see RM0433 *SYSCFG_PMCR*). If SPI2 MISO reads **0x000000** or never matches the LA on that pin, re-check HAT net, **AF5** on **GPIOC2**, and (package-dependent) whether **`PC2SO` should be set or cleared** — default **`PC2SO` closed** (digital path); optional **`-DPAT_SPI2_PC2SO_OPEN_INSTEAD`** sets the switch **open** if your package needs the previous behaviour. **`!CS`** on **PA15** / **PB4** is **`HAL_GPIO_DeInit` then per-pin `HAL_GPIO_Init`** so those balls leave reset **JTAG/SWJ** alternate functions before driving **GPIO** chip-select.
 
 ### Channel 2 — SPI3
 

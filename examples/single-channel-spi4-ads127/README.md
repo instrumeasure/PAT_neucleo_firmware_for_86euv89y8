@@ -1,6 +1,8 @@
 # Example: single SPI4 + ADS127L11 (logical channel 3)
 
-This folder documents the **default** PAT firmware application: one TI ADS127L11 on **SPI4** with **software `!CS`**, **SDO/DRDY polled on MISO**, and **USART3** logging. It is the canonical reference for bringing up **one** ADC channel before scaling to SPI1–4.
+This folder documents the **default** PAT firmware application: one TI ADS127L11 on **SPI4** with **software `!CS`**, **SDO/DRDY polled on MISO**, and **USART3** logging. It is the canonical reference for bringing up **one** ADC channel on **SPI4** before scaling to SPI1–4.
+
+**See also:** [single-bus-spi1-4-ads127](../single-bus-spi1-4-ads127/README.md) — same protocol with **`main_single_ads127_spi.c`** and **`pat_nucleo_spi1_ads127` … `pat_nucleo_spi4_ads127`** (one ELF per bus).
 
 ## Hardware
 
@@ -30,7 +32,7 @@ Other tree roots (`main_spi6.c`, `main_spi_test.c`) are **separate** targets; th
 - **Mode:** SPI mode **1** in HAL terms: `CLKPolarity` low, `CLKPhase` **2nd edge** (`SPI_PHASE_2EDGE`).  
 - **`!CS`:** GPIO **manual** (`SPI_NSS_SOFT`); all ADS127 transfers assert CS in driver code, not from the SPI peripheral NSS.  
 - **`f_SCLK`:** set in `MX_SPI4_Init()` via `BaudRatePrescaler`; nominal bit rate is \(f_{\mathrm{SPI4\_ker}} / \mathrm{prescaler}\) (see `HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI4)` in `main.c`).  
-- **24-bit conversion read** (`ads127_read_sample24_blocking`): assert `!CS` → short post-CS delay → poll **MISO** until **low** (DRDY / SDO mode) → `HAL_SPI_TransmitReceive` **3×** 0x00 → deassert `!CS` immediately after HAL returns (no extra busy-wait there). **No** “arm MISO high” phase in the current code.
+- **24-bit conversion read** (`ads127_read_sample24_blocking`): assert `!CS` → short post-CS delay → **`__HAL_SPI_DISABLE`** on that bus → poll **MISO** until **low** (DRDY / SDO mode) → **`__HAL_SPI_ENABLE`** → `HAL_SPI_TransmitReceive` **3×** 0x00 → deassert `!CS` immediately after HAL returns (no extra busy-wait there). **SPE is off** only during the DRDY GPIO poll so `IDR` matches the SDO pad (H7 + AF).
 
 `main.c` calls `ads127_read_sample24_blocking` **continuously** in the main loop (throughput set by DRDY / ODR); **printf** (and LED toggle) run about **once per second** so the UART path does not limit sampling.
 

@@ -18,7 +18,7 @@ Keep the **Cube pack revision** (`STM32_CUBE_H7_FW` / `framework-stm32cubeh7`) a
 ## How this repo uses that map
 
 - **Bring-up and tick:** follow **`stm32h7-hal-pitfalls`** (SysTick, `HAL_InitTick`, PLL); UM2217 documents the HAL timebase idea; pitfalls doc is project-specific.
-- **Handles, `MspInit`, `State`:** follow **`SKILL.md`** in this folder — that is the distilled pattern (including the **`RESET` → `MspInit`** rule when cloning handles).
+- **Handles, `MspInit`, `State`:** follow **`SKILL.md`** in the parent folder — that is the distilled pattern (including the **`RESET` → `MspInit`** rule when cloning handles).
 - **Silicon truth:** UM2217 + HAL source still lose to **RM** + **errata** for “why does this bit do X?”.
 
 ## STMicroelectronics HAL driver source (GitHub component)

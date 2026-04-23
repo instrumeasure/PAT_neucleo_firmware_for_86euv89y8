@@ -63,7 +63,7 @@ static void MX_SPI4_Init(void)
   hspi4.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi4.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi4.Init.NSS = SPI_NSS_SOFT;
-  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi4.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi4.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi4.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -76,59 +76,11 @@ static void MX_SPI4_Init(void)
   hspi4.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
   hspi4.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
   hspi4.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-  hspi4.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+  hspi4.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
   hspi4.Init.IOSwap = SPI_IO_SWAP_DISABLE;
   if (HAL_SPI_Init(&hspi4) != HAL_OK) {
     Error_Handler();
   }
-}
-
-static void pat_print_ads127_fault_mask(uint32_t m)
-{
-  if (m == 0u) {
-    return;
-  }
-  printf("fault_mask bits: ");
-  if ((m & (1u << 0)) != 0u) {
-    printf("[0]RREG_DEV_ID_fail ");
-  }
-  if ((m & (1u << 1)) != 0u) {
-    printf("[1]DEV_ID_neq_00h ");
-  }
-  if ((m & (1u << 2)) != 0u) {
-    printf("[2]RREG_CFG4_pre_fail ");
-  }
-  if ((m & (1u << 3)) != 0u) {
-    printf("[3]WREG_CFG4_fail ");
-  }
-  if ((m & (1u << 4)) != 0u) {
-    printf("[4]RREG_CFG2_pre_fail ");
-  }
-  if ((m & (1u << 5)) != 0u) {
-    printf("[5]WREG_CFG2_fail ");
-  }
-  if ((m & (1u << 6)) != 0u) {
-    printf("[6]RREG_CFG3_pre_fail ");
-  }
-  if ((m & (1u << 7)) != 0u) {
-    printf("[7]WREG_CFG3_fail ");
-  }
-  if ((m & (1u << 9)) != 0u) {
-    printf("[9]RREG_CFG4_post_fail ");
-  }
-  if ((m & (1u << 10)) != 0u) {
-    printf("[10]CFG4_no_CLK_SEL_readback ");
-  }
-  if ((m & (1u << 11)) != 0u) {
-    printf("[11]CFG2_no_SDO_MODE_readback ");
-  }
-  if ((m & (1u << 12)) != 0u) {
-    printf("[12]CFG3_FILTER_neq_OS256 ");
-  }
-  if ((m & (1u << 13)) != 0u) {
-    printf("[13]shadow_all_zero_suspect_float ");
-  }
-  printf("\r\n");
 }
 
 int main(void)
@@ -154,8 +106,8 @@ int main(void)
   ads127_cs_probe_pulse_ms(12u);
 
   uint32_t spi_ker_hz = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI4);
-  /* Must match MX_SPI4_Init() BaudRatePrescaler (_8 → divide kernel clock by 8). */
-  const uint32_t spi4_presc = 8u;
+  /* Must match MX_SPI4_Init() BaudRatePrescaler (_16 → divide kernel clock by 16). */
+  const uint32_t spi4_presc = 16u;
   uint32_t f_sclk_hz = spi_ker_hz / spi4_presc;
 
   printf("\r\nPAT Milestone 1 - SPI4 ADS127L11 logical ch3 + USART3\r\n");
@@ -170,11 +122,20 @@ int main(void)
   memset(&sh, 0, sizeof(sh));
   memset(&dg, 0, sizeof(dg));
 
-  int br = ads127_bringup(&hspi4, &sh, &dg);
-  printf("ads127_bringup=%d fault_mask=0x%08lX\r\n", br, (unsigned long)dg.fault_mask);
-  pat_print_ads127_fault_mask(dg.fault_mask);
-  if (br != 0 || dg.fault_mask != 0u) {
-    printf("ADS127: verify J1 ch3 wiring (PE11 !CS, PE12 SCK, PE6 MOSI, PE13 MISO, PF0 nRESET, PF1 START), HAT power, and 25 MHz modulator CLK to the ADC.\r\n");
+  int br = ads127_bringup_retry(&hspi4, &sh, &dg, 2u);
+  printf("ads127_bringup(last after up to 2 tries)=%d fault_mask=0x%08lX\r\n", br, (unsigned long)dg.fault_mask);
+  ads127_print_fault_mask(dg.fault_mask);
+  const int bu_ok = ads127_bringup_ok(br, dg.fault_mask);
+  if (!bu_ok) {
+    printf("ADS127: verify J1 ch3 (PE11 !CS, PE12 SCK, PE6 MOSI, PE13 MISO, PF0 nRESET, PF1 START), HAT power, 25 MHz modulator CLK.\r\n");
+    printf("shadow 00-08: %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+           sh.dev_id, sh.rev_id, sh.status, sh.control, sh.mux,
+           sh.config1, sh.config2, sh.config3, sh.config4);
+#ifdef PAT_ADS127_STRICT_BRINGUP
+    ads127_halt_streaming_fault("SPI4 bring-up failed (fault_mask or exit code) after nRESET retry.");
+#else
+    printf("WARNING: bring-up incomplete; streaming anyway (reconfigure cmake -DPAT_ADS127_STRICT_BRINGUP=ON to halt).\r\n");
+#endif
   }
   printf("shadow 00-08: %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
          sh.dev_id, sh.rev_id, sh.status, sh.control, sh.mux,
@@ -191,7 +152,34 @@ int main(void)
   }
 
   ads127_start_set(1);
-  HAL_Delay(3u);
+  HAL_Delay(ADS127_START_STREAM_SETTLE_MS);
+  if (bu_ok) {
+    int pg = ads127_post_start_gate(&hspi4, &sh);
+    if (pg != 0) {
+      printf("ads127_post_start_gate=%d shadow 00-08: %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+             pg,
+             sh.dev_id, sh.rev_id, sh.status, sh.control, sh.mux,
+             sh.config1, sh.config2, sh.config3, sh.config4);
+#ifdef PAT_ADS127_STRICT_BRINGUP
+      const char *why = "post-START shadow verify failed";
+      if (pg == -1) {
+        why = "post-START ads127_shadow_refresh SPI error";
+      } else if (pg == -2) {
+        why = "post-START CONFIG4 bit7 (external CLK) not set";
+      } else if (pg == -3) {
+        why = "post-START CONFIG3 filter field not OS256 (0x03)";
+      } else if (pg == -4) {
+        why = "post-START CONFIG2 SDO_MODE bit not set";
+      } else if (pg == -5) {
+        why = "post-START shadow all-zero (suspect MISO float)";
+      }
+      ads127_halt_streaming_fault(why);
+#else
+      printf("WARNING: post-START gate failed; streaming anyway (strict bring-up OFF).\r\n");
+      ads127_after_failed_post_start_gate();
+#endif
+    }
+  }
 
   uint8_t samp[3] = {0};
   HAL_StatusTypeDef rs = ads127_read_sample24_blocking(&hspi4, samp, 10u, &dg);
@@ -210,7 +198,7 @@ int main(void)
       HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
       uint32_t u24 =
           ((uint32_t)samp[0] << 16) | ((uint32_t)samp[1] << 8) | (uint32_t)samp[2];
-      int32_t s24 = (int32_t)((u24 << 8) >> 8);
+      int32_t s24 = (int32_t)((u24 & 0xFFFFFFu) << 8) >> 8;
       printf("ADC,ch3,tick_ms=%lu,raw24=0x%06lX,sdec=%ld,st=%u,to=%lu,arm_skip=%u\r\n",
              (unsigned long)now,
              (unsigned long)(u24 & 0xFFFFFFu),

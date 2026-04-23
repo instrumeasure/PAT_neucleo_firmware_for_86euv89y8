@@ -6,6 +6,9 @@ description: >-
   this repo is CMake + STM32Cube HAL — see stm32cube-cmake-pat. Triggers: pio,
   PlatformIO, platformio.ini, upload via PIO, serial monitor, populate
   framework-stm32cubeh7 for CMake.
+metadata:
+  pattern: tool-wrapper
+  version: "1.0"
 ---
 
 # PlatformIO — PAT Nucleo (STM32 + ADS127L11)

@@ -30,6 +30,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
     HAL_GPIO_Init(PAT_PINMAP_SPI2_SCK_PORT, &gpio);
 
     gpio.Pin = PAT_PINMAP_SPI2_MISO_PIN;
+    gpio.Alternate = PAT_PINMAP_SPI2_AF;
     HAL_GPIO_Init(PAT_PINMAP_SPI2_MISO_PORT, &gpio);
   } else if (hspi->Instance == SPI3) {
     __HAL_RCC_SPI3_CLK_ENABLE();
@@ -60,6 +61,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
     HAL_GPIO_Init(PAT_PINMAP_SPI6_SCK_PORT, &gpio);
 
     gpio.Pin = PAT_PINMAP_SPI6_GPIOG_AF_PINS;
+    gpio.Alternate = PAT_PINMAP_SPI6_AF;
     HAL_GPIO_Init(PAT_PINMAP_SPI6_NSS_PORT, &gpio);
   }
 }

@@ -6,6 +6,9 @@ description: >-
   compiled. Applies to CMake+HAL and PlatformIO stm32cube builds. Symptoms:
   hung CPU, LED stuck on, HAL_Delay infinite or wrong timing, weak vector to
   Default_Handler. NUCLEO-H753ZI, USART3 VCP.
+metadata:
+  pattern: tool-wrapper
+  version: "1.0"
 ---
 
 # STM32H7 + STM32Cube HAL — bring-up pitfalls (this repo)

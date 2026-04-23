@@ -16,10 +16,11 @@ Coding: HAL in-tree • minimal ISRs • `stdint` + TI register names • no sil
 build[primary]
 invoke,cmd
 cmake_ninja,powershell -ExecutionPolicy Bypass -File scripts/Build-Stm32CubeCMake.ps1
-flash_openocd,powershell -File scripts/Flash-Stm32CubeOpenOCD.ps1
+flash_openocd,powershell -File scripts/Flash-Stm32CubeOpenOCD.ps1|default pat_nucleo_h753|four-channel -Quartet|SPI1-4 net scan -Spi1_4|-Spi123 alias|single bus N -SingleSpi 1..4 → pat_nucleo_spiN_ads127|SPI6 -Spi6
 hal_pack,STM32_CUBE_H7_FW or %USERPROFILE%\.platformio\packages\framework-stm32cubeh7 (populate via py -m platformio run -e nucleo_h753zi once)
-out,cmake-build/pat_nucleo_h753.{elf,bin}
+out,cmake-build/pat_nucleo_h753.{elf,bin}|also pat_nucleo_spi{1,2,3,4}_ads127.{elf,bin}
 needs,CMake Ninja arm-none-eabi-gcc | skill,.cursor/skills/stm32cube-cmake-pat/SKILL.md
+ads127_gate,default warn+stream|strict halt cmake -DPAT_ADS127_STRICT_BRINGUP=ON then rebuild
 ```
 
 Optional: `platformio.ini` / `.cursor/skills/platformio-stm32-pat/SKILL.md` • Cube snapshot `cube/legacy_86euv89y8_h753zi.ioc` • timing/SPI changes → LA/scope CLK CS SCLK DRDY.
@@ -70,6 +71,9 @@ rules_skills[path,role]
 .cursor/skills/platformio-stm32-pat/SKILL.md,optional PIO
 .cursor/skills/stm32h7-hal-pitfalls/SKILL.md,SysTick PLL tick
 .cursor/skills/stm32cube-hal-model/SKILL.md,HAL model UM2217 MspInit State
+.cursor/skills/single-channel-spi4-ads127/SKILL.md,single ADS127L11 DRDY poll pat_nucleo_h753 main_single pat_nucleo_spi1_4_ads127
+.cursor/skills/spi2-pc2c-miso-h7-pat/SKILL.md,SPI2 PC2_C MISO PC2SO pat_nucleo_spi2_ads127 logical ch1
+.cursor/skills/four-channel-spi-ads127-quartet/SKILL.md,SPI1-4 quartet ads127_read_quartet_blocking pat_nucleo_quartet
 ```
 
 ```toon
@@ -77,6 +81,30 @@ example_ref[single SPI4 + ADS127L11 ch3]
 readme,examples/single-channel-spi4-ads127/README.md
 index,examples/README.md
 elf,cmake-build/pat_nucleo_h753.elf|APP_SRC main.c in root CMakeLists.txt
+```
+
+```toon
+example_ref[quartet SPI1-4 + four ADS127L11]
+readme,examples/four-channel-spi1-4-ads127/README.md
+index,examples/README.md
+elf,cmake-build/pat_nucleo_quartet.elf|APP_QUARTET_SRC main_quartet.c in root CMakeLists.txt
+order,SPI1→SPI2→SPI3→SPI4|ads127_read_quartet_blocking
+```
+
+```toon
+example_ref[single bus SPI1-4 one ADS127 per ELF]
+readme,examples/single-bus-spi1-4-ads127/README.md
+index,examples/README.md
+elf,cmake-build/pat_nucleo_spi1_ads127|cmake-build/pat_nucleo_spi2_ads127|cmake-build/pat_nucleo_spi3_ads127|cmake-build/pat_nucleo_spi4_ads127|main_single_ads127_spi.c PAT_ADS127_SINGLE_SPI_BUS
+flash,-SingleSpi 1|Flash-Stm32CubeOpenOCD.ps1
+```
+
+```toon
+example_ref[SPI1-4 net scan sequential single-channel phases]
+readme,examples/spi1-4-net-scan/README.md
+index,examples/README.md
+elf,cmake-build/pat_nucleo_spi1_4_scan.elf|main_spi1_4_scan.c
+flash,-Spi1_4|-Spi123 alias
 ```
 
 Overlap: **schematics + `src/` win** over this file and over rules.

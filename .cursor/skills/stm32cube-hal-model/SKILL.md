@@ -6,6 +6,9 @@ description: >-
   HAL vs LL, and debugging HAL_TIMEOUT. Use when editing HAL_Init/MspInit, cloning SPI/UART
   handles, reading UM2217 HAL/LL chapters, or explaining HAL behaviour vs RM / stm32h7xx_hal_ppp.c
   in the Cube pack.
+metadata:
+  pattern: tool-wrapper
+  version: "1.0"
 ---
 
 # STM32Cube HAL — driver model (PAT firmware)
@@ -22,7 +25,7 @@ HAL is normal C on top of CMSIS: it programs registers and tracks **per-handle**
 
 ST publishes the **H7 HAL and LL driver description** as **[UM2217](https://www.st.com/resource/en/user_manual/um2217-description-of-stm32h7-hal-and-lowlayer-drivers-stmicroelectronics.pdf)** (*Description of STM32H7 HAL and low-layer drivers*). Use it for **API structure**, **per-driver chapters** (SPI, UART, GPIO, DMA, …), **HAL vs LL**, and **dual-core / cohabitation** rules. Use the **reference manual (RM)** for register-level truth and the **Cube HAL sources** for exact sequencing on your pack revision.
 
-For a short chapter map and links, read [reference-um2217.md](reference-um2217.md).
+For a short chapter map and links, read [references/reference-um2217.md](references/reference-um2217.md).
 
 ## Handle
 
@@ -73,6 +76,6 @@ For **`TIM6_DAC_IRQHandler` / `SPI6_IRQHandler`**, guard with **`htim6.Instance 
 - **`stm32h7-hal-pitfalls`** — SysTick, PLL tick, `stm32h7xx_it.c`.
 - **`stm32cube-cmake-pat`** / **`platformio-stm32-pat`** — where the Cube HAL pack lives on disk.
 - **`PINMAP.md`** — project pins; HAL policy follows ST UM2217 / Cube pack sources.
-- **[reference-um2217.md](reference-um2217.md)** — UM2217 scope, when to open which ST doc.
+- **[references/reference-um2217.md](references/reference-um2217.md)** — UM2217 scope, when to open which ST doc.
 
 Project pinout (`cube/*.ioc`) and schematics override generic HAL tutorials.

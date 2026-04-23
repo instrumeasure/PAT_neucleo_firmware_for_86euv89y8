@@ -6,6 +6,9 @@ description: >-
   Flash-Stm32CubeOpenOCD.ps1 (OpenOCD, ST-Link V3). PAT Nucleo STM32H753ZI
   + Legacy QPD ADC HAT 86euv89y8. Triggers: STM32Cube, CMake compile, Ninja,
   flash ELF, OpenOCD, compile without PlatformIO, cube build, CLT toolchain.
+metadata:
+  pattern: pipeline
+  version: "1.0"
 ---
 
 # STM32Cube CMake — PAT Nucleo (H753ZI)
@@ -32,7 +35,7 @@ Verify pack: **`Drivers/CMSIS/Include/cmsis_compiler.h`** exists.
 powershell -ExecutionPolicy Bypass -File scripts/Build-Stm32CubeCMake.ps1
 ```
 
-**Outputs:** `cmake-build/pat_nucleo_h753.elf`, `pat_nucleo_h753.bin`, `compile_commands.json`.
+**Outputs:** `cmake-build/pat_nucleo_h753.elf`, `pat_nucleo_h753.bin`, quartet / SPI6 / SPI1–4 scan ELFs as configured, plus **`pat_nucleo_spi1_ads127` … `pat_nucleo_spi4_ads127`** (one ADS127 per SPI bus), `compile_commands.json`.
 
 **Custom HAL path:** `powershell` then `$env:STM32_CUBE_H7_FW = 'C:\path\to\STM32Cube_FW_H7';` run the script, or set the variable in System / user environment.
 
@@ -43,7 +46,9 @@ powershell -ExecutionPolicy Bypass -File scripts/Flash-Stm32CubeOpenOCD.ps1
 ```
 
 - Resolves **`openocd.exe`** from `PATH`, else **`%USERPROFILE%\.platformio\packages\tool-openocd\bin\openocd.exe`**.
-- Targets **`cmake-build/pat_nucleo_h753.elf`** by default; optional `-Elf` path.
+- **Default image (no args):** **`pat_nucleo_h753`** (single SPI4 + one ADS127). **Four-channel:** **`-Quartet`**. **SPI1–4 net check (single active SPI per phase, same workflow as default app):** **`-Spi1_4`** or **`-Spi123`** (alias) → `pat_nucleo_spi1_4_scan.elf`. **One bus only (separate ELFs):** **`-SingleSpi 1`** … **`-SingleSpi 4`** → `pat_nucleo_spiN_ads127.elf`. **SPI6 smoke:** **`-Spi6`**. Use **`-Elf`** for an explicit path. Only one of **`-Quartet` / `-Spi6` / `-Spi1_4` / `-Spi123` / `-SingleSpi`** at a time. The script prints **`OpenOCD program: …`** so you can confirm which file was used.
+- **ADS127 bring-up gate:** default CMake **`PAT_ADS127_STRICT_BRINGUP=OFF`** — UART **WARNING** then continue streaming if register bring-up / post-START shadow disagree (bench). **`cmake … -DPAT_ADS127_STRICT_BRINGUP=ON`** then rebuild to **halt** on failure (applies to `pat_nucleo_h753`, `pat_nucleo_quartet`, `pat_nucleo_spi1_4_scan`, and **`pat_nucleo_spi1_ads127` … `pat_nucleo_spi4_ads127`**).
+- **ADS127 post-START timing (firmware):** shared settle **`ADS127_START_STREAM_SETTLE_MS`** in `src/ads127l11.h` after `ads127_start_set(1)` before RREG verify / streaming. If **`ads127_post_start_gate`** fails and strict bring-up is **off**, **`ads127_after_failed_post_start_gate()`** (brief STOP/START + same settle) runs so conversion / SDO can resume — especially relevant on **SPI3**.
 - Uses **`interface/stlink.cfg`** + **`target/stm32h7x.cfg`** and `program "<elf>" verify reset exit` — do **not** hand-edit nested quotes in PowerShell `-c`; keep the script’s `-f`-style command string.
 
 If flash fails: board powered, USB ST-Link connected, close anything holding the ST-Link/VCP exclusively.
@@ -60,3 +65,4 @@ If flash fails: board powered, USB ST-Link connected, close anything holding the
 
 - **`.cursor/skills/platformio-stm32-pat/SKILL.md`** — optional PIO build/monitor.
 - **`.cursor/skills/stm32h7-hal-pitfalls/SKILL.md`** — SysTick / PLL tick (same HAL for CMake and PIO).
+- **`.cursor/skills/spi2-pc2c-miso-h7-pat/SKILL.md`** — **`-SingleSpi 2`** / **SPI2** **PC2** / **`PC2SO`** bring-up.

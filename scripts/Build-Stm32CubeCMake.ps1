@@ -40,6 +40,8 @@ if (-not (Test-Path $buildDir)) { New-Item -ItemType Directory -Path $buildDir |
 Push-Location $buildDir
 try {
   $toolchain = Join-Path $RepoRoot "cmake\gcc-arm-none-eabi.cmake"
+  # Optional: halt on ADS127 bring-up / post-START gate failure (default OFF = warn and continue):
+  #   cmake ... -DPAT_ADS127_STRICT_BRINGUP=ON
   cmake -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
     "-DSTM32_CUBE_H7_FW=$($env:STM32_CUBE_H7_FW)" `

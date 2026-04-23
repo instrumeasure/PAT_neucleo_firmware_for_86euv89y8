@@ -22,6 +22,13 @@
 /* ------------------------------------------------------------------ */
 /* SPI1 — channel 0                                                   */
 /* ------------------------------------------------------------------ */
+/*
+ * NUCLEO-H753ZI caveat: “School-bus” **SPI1 on PA5/PA6/PA7** clashes with **Ethernet RMII**
+ * (PA7 is a PHY line on the Nucleo) — see:
+ * https://community.st.com/t5/stm32-mcus-embedded-software/having-a-hardtime-to-get-spi1-working-on-stm32h753zi/td-p/140024
+ * PAT **86euv89y8** J1 uses **SPI1** on **PG11 (SCK), PD7 (MOSI), PG9 (MISO), PA4 (!CS)** instead.
+ * (H7 LL note from same thread: 8-bit frames use an **8-bit store** to the data register, not a raw 32-bit TXDR write.)
+ */
 
 #define PAT_PINMAP_SPI1_NCS_PORT   GPIOA
 #define PAT_PINMAP_SPI1_NCS_PIN    GPIO_PIN_4
@@ -38,6 +45,29 @@
 /* ------------------------------------------------------------------ */
 /* SPI2 — channel 1                                                   */
 /* ------------------------------------------------------------------ */
+/*
+ * MISO ball: STM32CubeMX often labels this pad **PC2_C** (H753 dual-pad / analog-switch family).
+ * CMSIS/HAL name is still **PC2** on **GPIOC** → `GPIO_PIN_2`. Same physical pin as Cube “PC2_C”.
+ *
+ * ST (NUCLEO-H753ZI / LQFP144): **PC2_C** is the package ball; the separate **PC2**-only pad exists
+ * only on **TFBGA240+25** — see ST Community thread:
+ * https://community.st.com/t5/stm32-mcus-products/subject-stm32h753zi-cannot-control-pc02-as-gpio-or-spi2-miso/td-p/655439
+ * That thread’s outcome: ST could toggle **PC2_C** on Nucleo; “stuck low” cases were treated as board /
+ * continuity / damaged IO, not a generic PC2 silicon bug. ST’s GPIO test used **SYSCFG_SWITCH_PC2_CLOSE**
+ * (`HAL_SYSCFG_AnalogSwitchConfig`) before driving the pin — align with `ads127_pins_init()` **PC2SO**
+ * default (switch closed for digital).
+ *
+ * Related (H735 **LQFP100**, SPI through **PC2_C** / **PC3_C** with switches closed): very slow edges /
+ * high effective series R through the analog switch (~300 Ω class), VDDA-powered switch, fragile **I_O**
+ * limits on **Pxy_C** — one report cites ST calling a **silicon issue** pending errata; others saw OK on
+ * Nucleo-H723. Useful background only; PAT Nucleo **LQFP144** routes SPI2 MISO on this ball with **PB15** MOSI.
+ * https://community.st.com/t5/stm32-mcus-products/stm32h735v-lqfp100-pc2-c-and-pc3-c-speed/td-p/214053
+ *
+ * **H753VIT6** / **PC2_C** as SPI2 MISO: ST recommends checking **SYSCFG_PMCR.PC2SO** (switch) and cites
+ * **datasheet + errata ES0392** — keep **external load** on **Pxy_C** pins within rated **I_O** (thread
+ * highlights **≤ 1 mA** class concern); measure if MISO looks stuck (e.g. 0xFF) while SCLK is active.
+ * https://community.st.com/t5/stm32-mcus-products/stm32h753vit6-pc2-c-pin/td-p/739240
+ */
 
 #define PAT_PINMAP_SPI2_NCS_PORT   GPIOB
 #define PAT_PINMAP_SPI2_NCS_PIN    GPIO_PIN_4

@@ -10,8 +10,10 @@
 #define PORT_MISO_LINE GPIOE
 #define PIN_MISO       GPIO_PIN_13
 
-#define TD_RSSC_MS 1u /* ≥ 400 µs @ 25 MHz mod CLK; 1 ms lazy */
-#define DRDY_POLL_STEP_US 5u
+/* SBAS946 td(RSSC) ≥ 10000·t_CLK @ 25 MHz mod CLK → 400 µs; use margin for first SPI. */
+#define TD_RSSC_MS 5u
+#define RREG_INTER_FRAME_MS 2u
+#define POST_WREG_MS 2u
 
 static void cs_high(void)
 {
@@ -49,6 +51,17 @@ void ads127_pins_init(void)
   HAL_GPIO_WritePin(PORT_START, PIN_START, GPIO_PIN_RESET);
 }
 
+void ads127_cs_probe_pulse_ms(uint32_t ms_low)
+{
+  cs_high();
+  HAL_Delay(2u);
+  cs_low();
+  if (ms_low != 0u) {
+    HAL_Delay(ms_low);
+  }
+  cs_high();
+}
+
 void ads127_nreset_pulse(void)
 {
   HAL_GPIO_WritePin(PORT_RST, PIN_RST, GPIO_PIN_RESET);
@@ -81,6 +94,8 @@ HAL_StatusTypeDef ads127_rreg(SPI_HandleTypeDef *hspi, uint8_t addr, uint8_t *ou
     return st;
   }
   (void)rx1;
+  /* Off-frame RREG: CS must go high between command and data frames; give the ADC time to decode. */
+  HAL_Delay(RREG_INTER_FRAME_MS);
 
   uint8_t tx2[2] = { 0x00u, 0x00u };
   uint8_t rx2[2];
@@ -96,7 +111,11 @@ HAL_StatusTypeDef ads127_wreg(SPI_HandleTypeDef *hspi, uint8_t addr, uint8_t dat
 {
   uint8_t tx[2] = { ADS127_CMD_WREG(addr), data };
   uint8_t rx[2];
-  return spi_x(hspi, tx, rx, 2u);
+  HAL_StatusTypeDef st = spi_x(hspi, tx, rx, 2u);
+  if (st == HAL_OK) {
+    HAL_Delay(POST_WREG_MS);
+  }
+  return st;
 }
 
 HAL_StatusTypeDef ads127_shadow_refresh(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh)

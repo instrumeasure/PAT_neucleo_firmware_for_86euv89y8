@@ -80,6 +80,54 @@ static void MX_SPI4_Init(void)
   }
 }
 
+static void pat_print_ads127_fault_mask(uint32_t m)
+{
+  if (m == 0u) {
+    return;
+  }
+  printf("fault_mask bits: ");
+  if ((m & (1u << 0)) != 0u) {
+    printf("[0]RREG_DEV_ID_fail ");
+  }
+  if ((m & (1u << 1)) != 0u) {
+    printf("[1]DEV_ID_neq_00h ");
+  }
+  if ((m & (1u << 2)) != 0u) {
+    printf("[2]RREG_CFG4_pre_fail ");
+  }
+  if ((m & (1u << 3)) != 0u) {
+    printf("[3]WREG_CFG4_fail ");
+  }
+  if ((m & (1u << 4)) != 0u) {
+    printf("[4]RREG_CFG2_pre_fail ");
+  }
+  if ((m & (1u << 5)) != 0u) {
+    printf("[5]WREG_CFG2_fail ");
+  }
+  if ((m & (1u << 6)) != 0u) {
+    printf("[6]RREG_CFG3_pre_fail ");
+  }
+  if ((m & (1u << 7)) != 0u) {
+    printf("[7]WREG_CFG3_fail ");
+  }
+  if ((m & (1u << 9)) != 0u) {
+    printf("[9]RREG_CFG4_post_fail ");
+  }
+  if ((m & (1u << 10)) != 0u) {
+    printf("[10]CFG4_no_CLK_SEL_readback ");
+  }
+  if ((m & (1u << 11)) != 0u) {
+    printf("[11]CFG2_no_SDO_MODE_readback ");
+  }
+  if ((m & (1u << 12)) != 0u) {
+    printf("[12]CFG3_FILTER_neq_OS256 ");
+  }
+  if ((m & (1u << 13)) != 0u) {
+    printf("[13]shadow_all_zero_suspect_float ");
+  }
+  printf("\r\n");
+}
+
 int main(void)
 {
   HAL_Init();
@@ -98,6 +146,9 @@ int main(void)
 
   MX_SPI4_Init();
   ads127_pins_init();
+  /* PE11=!CS: SPI frames are only ~8 µs @ 2 MHz SCLK — easy to miss on LA; slow pulse proves GPIO. */
+  printf("LA: 12 ms active-low !CS pulse on PE11 (then bringup SPI).\r\n");
+  ads127_cs_probe_pulse_ms(12u);
 
   uint32_t spi_ker_hz = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI4);
   uint32_t f_sclk_hz = spi_ker_hz >> 5u; /* /32 prescaler */
@@ -113,6 +164,7 @@ int main(void)
 
   int br = ads127_bringup(&hspi4, &sh, &dg);
   printf("ads127_bringup=%d fault_mask=0x%08lX\r\n", br, (unsigned long)dg.fault_mask);
+  pat_print_ads127_fault_mask(dg.fault_mask);
   if (br != 0 || dg.fault_mask != 0u) {
     printf("ADS127: verify J1 ch3 wiring (PE11 !CS, PE6/12/13 SPI4, PF0 nRESET, PF1 START), HAT power, and 25 MHz modulator CLK to the ADC.\r\n");
   }

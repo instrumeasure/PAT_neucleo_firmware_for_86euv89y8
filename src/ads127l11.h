@@ -39,6 +39,8 @@ typedef struct {
 } ads127_diag_t;
 
 void ads127_pins_init(void);
+/** Hold !CS (PE11) low for ms_low then release — slow edge for LA / DMM (no SPI clocks). */
+void ads127_cs_probe_pulse_ms(uint32_t ms_low);
 void ads127_nreset_pulse(void);
 void ads127_start_set(int run);
 

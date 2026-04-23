@@ -63,11 +63,13 @@ states,INIT ADC_CFG RUN ERR_SPI ERR_ADC|strings from app_state.c
 
 ```toon
 rules_skills[path,role]
+.cursor/skills/README.md,skill index read order matrix
 .cursor/rules/stm32-firmware.mdc,STM32 C style
 .cursor/rules/ads127l11-adc.mdc,TI wire/DRDY/SPI notes
 .cursor/skills/stm32cube-cmake-pat/SKILL.md,default build
 .cursor/skills/platformio-stm32-pat/SKILL.md,optional PIO
 .cursor/skills/stm32h7-hal-pitfalls/SKILL.md,SysTick PLL tick
+.cursor/skills/stm32cube-hal-model/SKILL.md,HAL model UM2217 MspInit State
 ```
 
 Overlap: **schematics + `src/` win** over this file and over rules.

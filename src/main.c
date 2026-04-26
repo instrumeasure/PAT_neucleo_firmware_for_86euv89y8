@@ -120,7 +120,7 @@ int main(void)
          sh.dev_id, sh.rev_id, sh.status, sh.control, sh.mux,
          sh.config1, sh.config2, sh.config3, sh.config4);
 
-  const uint32_t f_data_nom = 49000u;
+  const uint32_t f_data_nom = 24500u;
   uint32_t f_min_sclk = f_data_nom * 4u;
   printf("TI t_c(SC) floor check: 4*f_DATA_nom~%lu Hz <= f_SCLK %s\r\n",
          (unsigned long)f_min_sclk, (f_sclk_hz >= f_min_sclk) ? "OK" : "LOW");
@@ -146,7 +146,7 @@ int main(void)
       } else if (pg == -2) {
         why = "post-START CONFIG4 bit7 (external CLK) not set";
       } else if (pg == -3) {
-        why = "post-START CONFIG3 filter field not OS256 (0x03)";
+        why = "post-START CONFIG3 filter field not wideband OSR512 (0x04)";
       } else if (pg == -4) {
         why = "post-START CONFIG2 SDO_MODE bit not set";
       } else if (pg == -5) {

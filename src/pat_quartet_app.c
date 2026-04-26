@@ -57,7 +57,7 @@ unsigned pat_quartet_app_bringup_retry_all(
     }
     all_ok = 1u;
     for (unsigned c = 0u; c < ADS127_QUARTET_CHANNELS; c++) {
-      int br = ads127_bringup(hs[c], &sh[c], &dg_bu[c]);
+      int br = ads127_bringup_no_nreset(hs[c], &sh[c], &dg_bu[c]);
       br_ch[c] = br;
       printf("BRU,ch%u,bringup=%d,fault_mask=0x%08lX\r\n",
              (unsigned)c,

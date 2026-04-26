@@ -7,7 +7,8 @@ ENTRY(Reset_Handler)
 _estack = ORIGIN(DTCMRAM) + LENGTH(DTCMRAM);
 
 _Min_Heap_Size = 0x200;
-_Min_Stack_Size = 0x400;
+/* Quartet + printf: default 0x400 was tight; avoid silent stack smash into heap. */
+_Min_Stack_Size = 0x2000;
 
 MEMORY
 {

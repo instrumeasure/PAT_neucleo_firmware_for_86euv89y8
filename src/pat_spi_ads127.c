@@ -1,12 +1,23 @@
 #include "pat_spi_ads127.h"
 #include <string.h>
 
+/* Quartet (and other targets) may override SPI1–3 prescaler via CMake; default ÷64. */
+#if defined(PAT_SPI123_PRESCALER_8) && PAT_SPI123_PRESCALER_8
+#define PAT_SPI123_BR SPI_BAUDRATEPRESCALER_8
+#elif defined(PAT_SPI123_PRESCALER_16) && PAT_SPI123_PRESCALER_16
+#define PAT_SPI123_BR SPI_BAUDRATEPRESCALER_16
+#elif defined(PAT_SPI123_PRESCALER_32) && PAT_SPI123_PRESCALER_32
+#define PAT_SPI123_BR SPI_BAUDRATEPRESCALER_32
+#else
+#define PAT_SPI123_BR SPI_BAUDRATEPRESCALER_64
+#endif
+
 uint32_t pat_spi_ads127_prescaler_for_instance(const SPI_TypeDef *instance)
 {
   if (instance == SPI4) {
     return SPI_BAUDRATEPRESCALER_16;
   }
-  return SPI_BAUDRATEPRESCALER_64;
+  return PAT_SPI123_BR;
 }
 
 HAL_StatusTypeDef pat_spi_ads127_apply_template(SPI_HandleTypeDef *hspi, SPI_TypeDef *instance)

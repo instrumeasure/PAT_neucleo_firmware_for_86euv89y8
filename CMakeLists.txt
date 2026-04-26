@@ -11,9 +11,40 @@ endif()
 # ON: halt CPU when gate fails (re-run cmake with -DPAT_ADS127_STRICT_BRINGUP=ON).
 option(PAT_ADS127_STRICT_BRINGUP "Halt on ADS127 bring-up or post-START shadow gate failure" OFF)
 
+# ON: restore HAL_SPI_TransmitReceive for ADS127 RREG/WREG and 3-byte sample (A/B vs pat_spi_h7_master).
+option(PAT_ADS127_SPI_HAL_LEGACY "ADS127 SPI: legacy HAL transfers (bisect)" OFF)
+
 # SPI2 MISO (PC2 / PC2_C): default firmware clears PMCR.PC2SO (switch closed). If SPI2 bring-up
 # fails and MISO stays high (DRDY timeouts, shadow all zero), reconfigure with this ON and rebuild.
 option(PAT_SPI2_PC2SO_OPEN_INSTEAD "SPI2: SET PMCR.PC2SO (open); default is CLEAR (closed)" OFF)
+
+# `pat_nucleo_quartet` always builds with **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`** (shared !CS + DRDY gate + parallel sample).
+# **SPI4 MISO only** vs **all four MISO** for the DRDY wait:
+option(PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY "pat_nucleo_quartet: PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=1" ON)
+
+# TI SBAS946 §8.5.9: hold all J1 !CS low from init through nRESET so each ADS127 enters 3-wire SPI (no !CS high edges).
+option(PAT_ADS127_SPI_3WIRE_CS_HELD_LOW "pat_nucleo_quartet: PAT_ADS127_SPI_3WIRE_CS_HELD_LOW=1 (TI 3-wire)" OFF)
+
+# Throughput / LA correlate: UART `epoch_hz_est` from `span_us`; optional every-epoch print (UART flood).
+option(PAT_QUARTET_DIAG_EPOCH_EVERY "pat_nucleo_quartet: PAT_QUARTET_DIAG_EPOCH_EVERY=1" OFF)
+
+# Diag: per-bus `spi_master_rx3_zero_tx_unlocked` after shared DRDY (vs interleaved register or HAL SPI IT).
+option(PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED "pat_nucleo_quartet: PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED=1" OFF)
+
+# ON (default) = interleaved register quartet SPI (`pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi`, no HAL SPI IT).
+# OFF = HAL_SPI_TransmitReceive_IT + NVIC SPI1..4 IRQ.
+option(PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER "pat_nucleo_quartet: register SPI sample in parallel epoch (no HAL SPI IT)" ON)
+
+set(PAT_SPI123_PRESCALER_DIV "64" CACHE STRING "pat_nucleo_quartet: SPI1–3 HAL baud prescaler divisor (8|16|32|64)")
+set_property(CACHE PAT_SPI123_PRESCALER_DIV PROPERTY STRINGS 8 16 32 64)
+if(NOT PAT_SPI123_PRESCALER_DIV MATCHES "^(8|16|32|64)$")
+  message(FATAL_ERROR "PAT_SPI123_PRESCALER_DIV must be 8, 16, 32, or 64 (got '${PAT_SPI123_PRESCALER_DIV}').")
+endif()
+
+set(PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY "6" CACHE STRING "pat_nucleo_quartet: SPI1–4 NVIC preemption priority 0–15 (lower = more urgent)")
+if(NOT PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY MATCHES "^([0-9]|1[0-5])$")
+  message(FATAL_ERROR "PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY must be 0..15 (got '${PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY}').")
+endif()
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -95,6 +126,7 @@ set(APP_SRC
   "${CMAKE_SOURCE_DIR}/src/main.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
   "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_h7_master.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -158,8 +190,10 @@ set(APP_QUARTET_SRC
   "${CMAKE_SOURCE_DIR}/src/main_quartet.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
   "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_h7_master.c"
   "${CMAKE_SOURCE_DIR}/src/pat_quartet_epoch.c"
   "${CMAKE_SOURCE_DIR}/src/pat_quartet_app.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_quartet_spi_irq.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -169,6 +203,40 @@ add_executable(pat_nucleo_quartet
   ${CMSIS_SRC}
   ${HAL_SRC}
   ${APP_QUARTET_SRC}
+)
+
+target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_DRDY_WAIT=1)
+if(PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=1)
+endif()
+
+if(PAT_ADS127_SPI_3WIRE_CS_HELD_LOW)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_ADS127_SPI_3WIRE_CS_HELD_LOW=1)
+endif()
+
+if(PAT_QUARTET_DIAG_EPOCH_EVERY)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_DIAG_EPOCH_EVERY=1)
+endif()
+
+if(PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED=1)
+endif()
+
+if(PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=1)
+endif()
+
+if(PAT_SPI123_PRESCALER_DIV STREQUAL "8")
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_SPI123_PRESCALER_8=1)
+elseif(PAT_SPI123_PRESCALER_DIV STREQUAL "16")
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_SPI123_PRESCALER_16=1)
+elseif(PAT_SPI123_PRESCALER_DIV STREQUAL "32")
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_SPI123_PRESCALER_32=1)
+endif()
+
+target_compile_definitions(
+  pat_nucleo_quartet
+  PRIVATE "PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY=${PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY}u"
 )
 
 target_link_options(pat_nucleo_quartet PRIVATE
@@ -193,6 +261,7 @@ set(APP_SPI1_4_SCAN_SRC
   "${CMAKE_SOURCE_DIR}/src/main_spi1_4_scan.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
   "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_h7_master.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -226,6 +295,7 @@ set(APP_SINGLE_ADS127_SPI_SRC
   "${CMAKE_SOURCE_DIR}/src/main_single_ads127_spi.c"
   "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
   "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_spi_h7_master.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
@@ -264,5 +334,14 @@ if(PAT_ADS127_STRICT_BRINGUP)
   target_compile_definitions(pat_nucleo_spi1_4_scan PRIVATE PAT_ADS127_STRICT_BRINGUP=1)
   foreach(bus RANGE 1 4)
     target_compile_definitions(pat_nucleo_spi${bus}_ads127 PRIVATE PAT_ADS127_STRICT_BRINGUP=1)
+  endforeach()
+endif()
+
+if(PAT_ADS127_SPI_HAL_LEGACY)
+  target_compile_definitions(pat_nucleo_h753 PRIVATE PAT_ADS127_SPI_HAL_LEGACY=1)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_ADS127_SPI_HAL_LEGACY=1)
+  target_compile_definitions(pat_nucleo_spi1_4_scan PRIVATE PAT_ADS127_SPI_HAL_LEGACY=1)
+  foreach(bus RANGE 1 4)
+    target_compile_definitions(pat_nucleo_spi${bus}_ads127 PRIVATE PAT_ADS127_SPI_HAL_LEGACY=1)
   endforeach()
 endif()

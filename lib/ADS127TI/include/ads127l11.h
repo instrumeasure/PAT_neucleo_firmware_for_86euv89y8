@@ -22,10 +22,10 @@
 #define ADS127_REG_CONFIG4 0x08U
 
 /*
- * CONFIG3 FILTER[4:0] (Table 8-25): 00011b = wideband, OSR 256.
- * Use when you re-enable CONFIG writes after bring-up (not used in default-only startup).
+ * CONFIG3 FILTER[4:0] (Table 8-25): 00100b = wideband, OSR 512.
+ * (00011b was OSR256 — superseded in PAT bring-up.)
  */
-#define ADS127_CONFIG3_WIDEBAND_OSR256 0x03U
+#define ADS127_CONFIG3_WIDEBAND_OSR512 0x04U
 
 /*
  * CONFIG4 bit7: 0x80 = external master clock on CLK; 0x00 = internal 25.6 MHz (SBAS946 POR default).
@@ -36,10 +36,10 @@
 #define ADS127_CONFIG4_USER 0x00U
 #endif
 
-/* Match TIM6 / quartet polling to OSR256 wideband ODR vs modulator f_CLK (SBAS946 Table 7-1). */
-#define ADS127_ODR_HZ_NOMINAL_25M6_MHZ 50000U
-/* ~48.8 kSPS @ 25.0 MHz FCLK (scale from 50 k @ 25.6 MHz). */
-#define ADS127_ODR_HZ_25M_EXT 48828U
+/* Match TIM6 / quartet polling to OSR512 wideband ODR vs modulator f_CLK (SBAS946 Table 7-1). */
+#define ADS127_ODR_HZ_NOMINAL_25M6_MHZ 25000U
+/* ~24.4 kSPS @ 25.0 MHz FCLK, wideband OSR512 (half of former OSR256 ODR). */
+#define ADS127_ODR_HZ_25M_EXT 24414U
 
 /* SBAS946 Table 8-18: DEV_ID 00h identifies ADS127L11. */
 #define ADS127_DEV_ID_EXPECTED 0x00U

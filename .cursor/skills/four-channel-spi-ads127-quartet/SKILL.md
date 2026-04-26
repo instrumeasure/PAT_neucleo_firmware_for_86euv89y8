@@ -2,7 +2,8 @@
 name: four-channel-spi-ads127-quartet
 description: >-
   PAT NUCLEO-H753ZI + four TI ADS127L11 on SPI1–SPI4 (86euv89y8 J1): quartet epoch
-  SPI1→SPI2→SPI3→SPI4, ads127_read_quartet_blocking, per-channel ads127_ch_ctx_t,
+  shared !CS + parallel DRDY (`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`), logical ch0..3 = SPI1..SPI4,
+  ads127_read_quartet_blocking, per-channel ads127_ch_ctx_t,
   four !CS GPIO idle high, SPI Init parity, bare-metal cooperative scheduling from
   main (no RTOS). Triggers: quartet, SPI1 SPI2 SPI3 SPI4, four ADS127, AGENTS
   quartet_order, pat_nucleo_quartet.

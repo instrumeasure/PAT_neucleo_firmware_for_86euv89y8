@@ -200,7 +200,7 @@ int main(void)
       } else if (pg == -2) {
         why = "post-START CONFIG4 bit7 (external CLK) not set";
       } else if (pg == -3) {
-        why = "post-START CONFIG3 filter field not OS256 (0x03)";
+        why = "post-START CONFIG3 filter field not wideband OSR512 (0x04)";
       } else if (pg == -4) {
         why = "post-START CONFIG2 SDO_MODE bit not set";
       } else if (pg == -5) {

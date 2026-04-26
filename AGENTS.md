@@ -27,10 +27,12 @@ Optional: `platformio.ini` / `.cursor/skills/platformio-stm32-pat/SKILL.md` • 
 
 ```toon
 runtime[key]
-sample_hz,48828|SAMPLE_RATE_HZ TIM6 when ADS127_CONFIG4_USER=0x80 (25 MHz FCLK) ≈ 50k×25/25.6 OSR256 wideband
-sample_hz_alt,50000|if CONFIG4 internal (0x00) @ 25.6 MHz nominal — use ADS127_ODR_HZ_NOMINAL_25M6_MHZ
+sample_hz,24414|SAMPLE_RATE_HZ TIM6 when ADS127_CONFIG4_USER=0x80 (25 MHz FCLK) ≈ 50k×25/25.6/2 OSR512 wideband
+sample_hz_alt,25000|if CONFIG4 internal (0x00) @ 25.6 MHz nominal OSR512 — use ADS127_ODR_HZ_NOMINAL_25M6_MHZ
 ext_clk,ADS127_CONFIG4_USER=0x80 default in ads127l11.h (external master clock on CLK per SBAS946)
-quartet_order,SPI1→SPI2→SPI3→SPI4|last_raw[4] only if all four reads OK
+quartet_order,ch0..3=SPI1..SPI4|`pat_nucleo_quartet`: always **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`** (shared !CS + DRDY epoch; no per-channel sequential quartet in-tree). **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=ON` (default)** → interleaved register quartet SPI (`pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi`, no HAL SPI IT); **OFF** → `HAL_SPI_TransmitReceive_IT` + NVIC; **`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=ON` (default)** → SPI4 MISO (`ctxs[3]`) DRDY gate only; **OFF** → all four MISO; UART milestones `main_quartet.c`; bring-up: one **nRESET** + `ads127_bringup_no_nreset` per bus
+quartet_ti_3wire_spi,optional CMake|`PAT_ADS127_SPI_3WIRE_CS_HELD_LOW=ON` (quartet target only): SBAS946 §8.5.9 — all four !CS **held low** from GPIO init through nRESET so each ADS127 latches 3-wire (STATUS.CS_MODE=1); firmware never drives !CS high; frames delimited by SCLK count; see `ads127l11.c` / `main_quartet.c`
+quartet_epoch_vs_odr,UART+LA|`EPOCH,...,epoch_hz_est` ≈ 1e6/`span_us` (MCU quartet **epoch** rate); nominal per-die ODR ~`sample_hz` (TIM6 note is `main.c` only); LA on **!CS** (4-wire) ≈ two edges per epoch on each chip-select; **SCLK** is bursty; CMake throughput knobs (quartet only): `PAT_SPI123_PRESCALER_DIV` 8|16|32|64, `PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY` 0–15, `PAT_QUARTET_DIAG_EPOCH_EVERY`, `PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED` (requires parallel ON); future DMA tier-B — [include/pat_quartet_p4_dma.h](include/pat_quartet_p4_dma.h), [examples/four-channel-spi1-4-ads127/README.md](examples/four-channel-spi1-4-ads127/README.md)
 clk_source,HAT generates CLK → MCU does not drive unless you add MCO/TIM doc’d in code
 qpd_dsp,3×16 ring per path raw|I|Q y=(sum)>>4|p nibble in SPI6 hdr
 spi6_j2,PA5 SCK PG8 NSS PG12 MISO PG14 MOSI|SPI6 slave fmt0x02 64B LE sample_index+8B hdr+4×3×24b BE+pad|IT double-buffer

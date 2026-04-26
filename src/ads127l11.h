@@ -14,10 +14,53 @@
 #define ADS127_REG_CONFIG3  0x07u
 #define ADS127_REG_CONFIG4  0x08u
 
+/** CONFIG3 FILTER[4:0] (SBAS946 Table 8-25): wideband, OSR 512 = 00100b. */
+#define ADS127_CONFIG3_FILTER_WIDEBAND_OSR512 0x04u
+
 #define ADS127_CMD_RREG(addr)   ((uint8_t)(0x40u | ((addr) & 0x0Fu)))
 #define ADS127_CMD_WREG(addr)   ((uint8_t)(0x80u | ((addr) & 0x0Fu)))
 
 #define ADS127_QUARTET_CHANNELS 4u
+
+/**
+ * **`pat_nucleo_quartet`:** CMake always sets **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`**. `ads127_read_quartet_blocking`
+ * asserts all four !CS, waits for DRDY on MISO **before** any SCLK, then the 3-byte sample: default
+ * **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER`** → `pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi` (interleaved
+ * register SPI); **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=OFF`** → `HAL_SPI_TransmitReceive_IT` on SPI1..SPI4.
+ * With **`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY`**: only **SPI4** MISO (`ctxs[3]`) gates the epoch; **OFF** waits all
+ * four MISO. Other firmware images leave this macro **0**; `ads127_read_quartet_blocking` then returns **HAL_ERROR**.
+ */
+#ifndef PAT_QUARTET_PARALLEL_DRDY_WAIT
+#define PAT_QUARTET_PARALLEL_DRDY_WAIT 0
+#endif
+
+/** **1:** with `PAT_QUARTET_PARALLEL_DRDY_WAIT`: DRDY wait uses **SPI4 MISO only** (`ctxs[3]`); parallel IT unchanged. CMake only. */
+#ifndef PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
+#define PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY 0
+#endif
+
+/**
+ * **1:** TI SBAS946 §8.5.9 **3-wire SPI**: each ADS127 !CS net is held **low** from GPIO init through **nRESET**
+ * so the device latches 3-wire at POR (STATUS.CS_MODE = 1). The MCU **must not** drive !CS high or the part
+ * returns to 4-wire. SCLK bit count delimits frames (no CS framing). CMake on `pat_nucleo_quartet` only.
+ */
+#ifndef PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+#define PAT_ADS127_SPI_3WIRE_CS_HELD_LOW 0
+#endif
+
+/** **1:** with `PAT_QUARTET_PARALLEL_DRDY_WAIT`: characterisation path — sequential `spi_master_rx3_zero_tx_unlocked` per bus (no parallel IT overlap). CMake `pat_nucleo_quartet` only. */
+#ifndef PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED
+#define PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED 0
+#endif
+
+/**
+ * **1:** (with `PAT_QUARTET_PARALLEL_DRDY_WAIT`, and not `PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED`) sample phase uses
+ * **`pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi`** — no `HAL_SPI_TransmitReceive_*` / SPI NVIC for data.
+ * **0:** bisect baseline — `HAL_SPI_TransmitReceive_IT` + `pat_quartet_spi_irq.c`. CMake `pat_nucleo_quartet` only.
+ */
+#ifndef PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER
+#define PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER 0
+#endif
 
 /** Per-channel SPI + soft !CS + MISO (DRDY poll) for one ADS127L11. */
 typedef struct {
@@ -73,9 +116,16 @@ HAL_StatusTypeDef ads127_shadow_refresh(SPI_HandleTypeDef *hspi, ads127_shadow_t
 
 /**
  * Milestone 1 bring-up: external CLK (CONFIG4 bit7), SDO_MODE+START_MODE in CONFIG2,
- * wideband OSR256 CONFIG3=0x03. PF1 held low during WREG to 04h–0Eh.
+ * wideband OSR512 CONFIG3 FILTER=00100b (`ADS127_CONFIG3_FILTER_WIDEBAND_OSR512`). PF1 held low during WREG to 04h–0Eh.
+ *
+ * `ads127_bringup`: pulses shared **nRESET** then programmes the bus (single-channel apps).
+ * Quartet: one shared `ads127_nreset_pulse()` then **`ads127_bringup_no_nreset`** per SPI — calling
+ * `ads127_bringup` on each channel would reset every ADC each time and only the last bus retains config.
  */
 int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *dg);
+
+/** Register programming only; no nRESET (use after one shared `ads127_nreset_pulse()` on quartet). */
+int ads127_bringup_no_nreset(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *dg);
 
 /** Returns 1 if `bringup_err == 0` and `fault_mask == 0` (safe to stream); else 0. */
 int ads127_bringup_ok(int bringup_err, uint32_t fault_mask);
@@ -92,7 +142,7 @@ int ads127_bringup_retry(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_di
 /**
  * After `ads127_start_set(1)` and `ADS127_START_STREAM_SETTLE_MS`: verify programmed mode via shadow refresh.
  * Briefly asserts **START low** so RREG readback is not corrupted by SDO/DRDY activity (SPI3).
- * Returns 0 if OK; -1 shadow SPI error; -2 CONFIG4 CLK_SEL; -3 CONFIG3 filter; -4 CONFIG2 SDO_MODE;
+ * Returns 0 if OK; -1 shadow SPI error; -2 CONFIG4 CLK_SEL; -3 CONFIG3 filter (expect OSR512 code); -4 CONFIG2 SDO_MODE;
  * -5 shadow all-zero (suspect float / no readback).
  */
 int ads127_post_start_gate(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh);
@@ -109,8 +159,9 @@ void ads127_halt_streaming_fault(const char *msg);
 
 /**
  * Phase A: !CS low, **≥100 ns** (`delay_after_cs_100ns`), then poll MISO until **SDO/DRDY low** (ready),
- * with SPI (SPE) off. MISO is briefly **GPIO input** with **pull-up** so **IDR** tracks the pad, then AF
- * for the 24 SCLKs. Phase B: 24-bit read (MOSI 0x00,0x00,0x00).
+ * with SPI (SPE) off. MISO is briefly **GPIO input** (fast `MODER` plus pull-up); wait uses **DWT**
+ * cycle budget (no `HAL_GetTick` in the inner loop). Phase B: **AF** + **H7 SPI v2** 3-byte path without
+ * `HAL_SPI_TransmitReceive` lock (same TXP or RXP plus EOT behaviour as HAL), then `!CS` high.
  */
 HAL_StatusTypeDef ads127_read_sample24_blocking(
     SPI_HandleTypeDef *hspi,
@@ -126,13 +177,11 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
     ads127_diag_t *dg);
 
 /**
- * One epoch: SPI1→SPI2→SPI3→SPI4 per AGENTS. Fills out24[ch][3]; updates dg[ch] per channel.
- * Returns first non-HAL_OK status, or HAL_OK if all four succeed.
+ * One epoch ( **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`** on `pat_nucleo_quartet` ): shared !CS, SPI4-only or all-MISO
+ * DRDY wait, then register quartet SPI (default) or HAL SPI IT. Returns **HAL_ERROR** if this translation unit was
+ * built without quartet parallel support (`PAT_QUARTET_PARALLEL_DRDY_WAIT=0`).
  *
- * **Partial epoch contract:** On non-HAL_OK return at channel index `i`, indices `< i` contain
- * this attempt’s data; indices `> i` are set to **0xFF** in all three bytes; `dg[k]` for `k > i`
- * are zero-cleared. Channel `i` may contain partial data depending where failure occurred inside
- * `ads127_read_sample24_ch_blocking`.
+ * **Partial epoch:** on fail at `i`, `< i` valid, `> i` **0xFF**; parallel timeout / SPI fault paths clear similarly.
  */
 HAL_StatusTypeDef ads127_read_quartet_blocking(
     ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],

@@ -14,10 +14,16 @@
 #define PAT_QUARTET_SYNC_BURST_EPOCHS 0u
 #endif
 
+/** CMake `PAT_QUARTET_DIAG_EPOCH_EVERY=ON`: print `CNT`/`EPOCH`/`CH` every epoch (UART flood; LA correlate `span_us`). */
+#ifndef PAT_QUARTET_DIAG_EPOCH_EVERY
+#define PAT_QUARTET_DIAG_EPOCH_EVERY 0
+#endif
+
 void pat_quartet_app_print_sync_debug_boot(void);
 
 /**
- * nRESET + up to two bring-up attempts. Prints `BRU`/`SH`/`TI`/`STAT` per channel.
+ * One shared **nRESET** per attempt, then **`ads127_bringup_no_nreset`** on SPI1..4 (avoids resetting all
+ * ADCs between channels). Prints `BRU`/`SH`/`TI`/`STAT` per channel.
  * @return 1 if all channels `ads127_bringup_ok`, else 0.
  */
 unsigned pat_quartet_app_bringup_retry_all(

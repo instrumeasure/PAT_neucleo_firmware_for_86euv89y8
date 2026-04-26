@@ -8,6 +8,12 @@
 #include "pat_spi_ads127.h"
 #include "pat_quartet_app.h"
 #include "pat_quartet_epoch.h"
+#if PAT_QUARTET_PARALLEL_DRDY_WAIT
+#include "pat_quartet_spi_irq.h"
+#endif
+#ifndef PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER
+#define PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER 0
+#endif
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -86,6 +92,9 @@ static void MX_SPI_All_Init(void)
   if (pat_spi_ads127_apply_template(&hspi4, SPI4) != HAL_OK) {
     Error_Handler();
   }
+#if PAT_QUARTET_PARALLEL_DRDY_WAIT && !PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER
+  pat_quartet_spi_parallel_irq_init();
+#endif
 }
 
 static void quartet_bind(ads127_ch_ctx_t ctx[ADS127_QUARTET_CHANNELS])
@@ -124,14 +133,25 @@ int main(void)
 
   {
     static const uint8_t kBoot[] =
-        "\r\nPAT quartet: USART3 alive (115200). SPI1-4 + four ADS127L11 epoch.\r\n";
+        "\r\nPAT quartet: USART3 alive (115200 8N1 PD8/PD9). SPI1-4 + four ADS127L11. ST-Link VCP COM port.\r\n";
     (void)HAL_UART_Transmit(&huart3, kBoot, (uint16_t)(sizeof(kBoot) - 1u), 500u);
   }
 
   ads127_pins_init();
   MX_SPI_All_Init();
 
-  printf("\r\nPAT Milestone quartet — SPI1->SPI2->SPI3->SPI4 scan order per epoch\r\n");
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  printf("\r\nPAT Milestone quartet — TI 3-wire SPI (SBAS946): all !CS held low; frames by SCLK count only\r\n");
+#endif
+#if PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED
+  printf("\r\nPAT Milestone quartet — !CS all four; DRDY gate as configured; SPI1..4 sequential unlocked 3B (diag)\r\n");
+#elif PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER
+  printf("\r\nPAT Milestone quartet — !CS all four; DRDY gate as configured; interleaved register SPI1..4 (no HAL SPI IT)\r\n");
+#elif PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
+  printf("\r\nPAT Milestone quartet — !CS all four; SPI4 MISO !DRDY/SDO gate only; parallel SPI IT SPI1..SPI4\r\n");
+#else
+  printf("\r\nPAT Milestone quartet — !CS all four; all-MISO DRDY gate; parallel SPI IT on SPI1..SPI4\r\n");
+#endif
   {
     uint32_t k1 = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI123);
     uint32_t k4 = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI4);
@@ -155,6 +175,14 @@ int main(void)
   memset(br_ch, 0, sizeof(br_ch));
 
   const unsigned all_ok = pat_quartet_app_bringup_retry_all(hs, sh, dg_bringup, br_ch);
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  printf(
+      "STATUS.CS_MODE bit7 (1=3-wire): ch0=%u ch1=%u ch2=%u ch3=%u\r\n",
+      (unsigned)((sh[0].status >> 7) & 1u),
+      (unsigned)((sh[1].status >> 7) & 1u),
+      (unsigned)((sh[2].status >> 7) & 1u),
+      (unsigned)((sh[3].status >> 7) & 1u));
+#endif
   if (all_ok == 0u) {
 #ifdef PAT_ADS127_STRICT_BRINGUP
     ads127_halt_streaming_fault("Quartet: one or more channels failed bring-up after nRESET retry.");
@@ -209,7 +237,10 @@ int main(void)
            samp[c][2]);
   }
 
-  uint32_t log_ms = HAL_GetTick();
+#if !PAT_QUARTET_DIAG_EPOCH_EVERY
+  /* First loop iteration should print CNT/EPOCH (not wait a full summary period after boot). */
+  uint32_t log_ms = HAL_GetTick() - PAT_QUARTET_SYNC_SUMMARY_MS;
+#endif
   uint32_t log_epoch_seq = 0u;
   uint32_t burst_done = 0u;
   uint32_t quartet_fail_total = 0u;
@@ -240,14 +271,20 @@ int main(void)
     const unsigned burst_active = 0u;
 #endif
 
+#if PAT_QUARTET_DIAG_EPOCH_EVERY
+    const int do_summary = 1;
+#else
     const int do_summary =
         burst_active || ((now - log_ms) >= PAT_QUARTET_SYNC_SUMMARY_MS);
+#endif
     if (burst_active) {
       burst_done++;
     }
+#if !PAT_QUARTET_DIAG_EPOCH_EVERY
     if (do_summary && !burst_active) {
       log_ms = now;
     }
+#endif
 
     if (do_summary) {
       HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
@@ -263,14 +300,19 @@ int main(void)
       const unsigned ok_mask = (rs == HAL_OK) ? 0x0Fu : 0u;
       const HAL_StatusTypeDef st_all = rs;
 
-      printf("EPOCH,epoch_seq=%lu,t_start_ms=%lu,t_end_ms=%lu,span_us=%lu,st_all=%u,ok_mask=%u,quartets_ok_total=%lu\r\n",
-             (unsigned long)log_epoch_seq,
-             (unsigned long)t0_ms,
-             (unsigned long)t1_ms,
-             (unsigned long)span_us,
-             (unsigned)st_all,
-             ok_mask,
-             (unsigned long)qok);
+      {
+        const uint32_t epoch_hz_est = (span_us != 0u) ? (1000000u / span_us) : 0u;
+        printf(
+            "EPOCH,epoch_seq=%lu,t_start_ms=%lu,t_end_ms=%lu,span_us=%lu,epoch_hz_est=%lu,st_all=%u,ok_mask=%u,quartets_ok_total=%lu\r\n",
+            (unsigned long)log_epoch_seq,
+            (unsigned long)t0_ms,
+            (unsigned long)t1_ms,
+            (unsigned long)span_us,
+            (unsigned long)epoch_hz_est,
+            (unsigned)st_all,
+            ok_mask,
+            (unsigned long)qok);
+      }
 
       for (unsigned c = 0u; c < ADS127_QUARTET_CHANNELS; c++) {
         uint32_t u24 =

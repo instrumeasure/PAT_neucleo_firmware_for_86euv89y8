@@ -1,7 +1,12 @@
 #include "ads127l11.h"
 #include "pat_pinmap.h"
+#include "pat_spi_h7_master.h"
 #include <stdio.h>
 #include <string.h>
+
+#ifndef PAT_ADS127_SPI_HAL_LEGACY
+#define PAT_ADS127_SPI_HAL_LEGACY 0
+#endif
 
 #define PORT_RST   PAT_PINMAP_ADS127_NRESET_PORT
 #define PIN_RST    PAT_PINMAP_ADS127_NRESET_PIN
@@ -36,9 +41,14 @@ static inline uint32_t ch_miso_high_raw(const ads127_ch_ctx_t *c)
   return (c->miso_port->IDR & (uint32_t)c->miso_pin) != 0u ? 1u : 0u;
 }
 
+/* TI SBAS946 §8.5.1.1: CS is active-low — 4-wire: frame starts CS low, ends CS high (MCU SET = idle). */
 static void ch_cs_high(const ads127_ch_ctx_t *c)
 {
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  (void)c;
+#else
   HAL_GPIO_WritePin(c->cs_port, c->cs_pin, GPIO_PIN_SET);
+#endif
 }
 
 static void ch_cs_low(const ads127_ch_ctx_t *c)
@@ -46,31 +56,176 @@ static void ch_cs_low(const ads127_ch_ctx_t *c)
   HAL_GPIO_WritePin(c->cs_port, c->cs_pin, GPIO_PIN_RESET);
 }
 
-/** H7: brief GPIO input on MISO so `IDR` follows SDO/DRDY (AF+SPE=0 is unreliable). Pull-up defines idle
- *  when the ADC tri-states SDO between edges (helps SPI3 PC11 / !DRDY sense). */
+/**
+ * Deassert every J1 !CS (idle high) in three BSRR writes: SPI1+SPI3 share GPIOA so both edges coincide
+ * on one store; SPI2 (GPIOB) and SPI4 (GPIOE) one store each. Faster and tighter skew than four HAL calls.
+ */
+static void quartet_ncs_all_deassert_bsrr(void)
+{
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  /* TI §8.5.9: taking CS high exits 3-wire — never deassert. */
+#else
+  const uint32_t a_cs = (uint32_t)PAT_PINMAP_SPI1_NCS_PIN | (uint32_t)PAT_PINMAP_SPI3_NCS_PIN;
+  PAT_PINMAP_SPI1_NCS_PORT->BSRR = a_cs;
+  PAT_PINMAP_SPI2_NCS_PORT->BSRR = (uint32_t)PAT_PINMAP_SPI2_NCS_PIN;
+  PAT_PINMAP_SPI4_NCS_PORT->BSRR = (uint32_t)PAT_PINMAP_SPI4_NCS_PIN;
+#endif
+}
+
+/** Deassert every J1 !CS before shared START edges or a new quartet epoch (avoids any pad left selected). */
+static void ads127_ncs_all_high(void)
+{
+  quartet_ncs_all_deassert_bsrr();
+}
+
+/** Pin index 0..15 for a single `GPIO_PIN_n` mask (MISO lines are one-hot). */
+static inline uint8_t miso_pin_pos(uint16_t pin)
+{
+  return (uint8_t)__builtin_ctz((unsigned)pin);
+}
+
+/**
+ * H7: MISO as GPIO input so `IDR` follows SDO/DRDY (AF+SPE=0 is unreliable). Pull-up when ADC tri-states.
+ * Register-only (no `HAL_GPIO_Init`) — hot path for every sample / quartet arm.
+ */
 static void ch_miso_enter_gpio_input(const ads127_ch_ctx_t *c)
 {
-  GPIO_InitTypeDef g = {0};
-  g.Pin = c->miso_pin;
-  g.Mode = GPIO_MODE_INPUT;
-  g.Pull = GPIO_PULLUP;
-  g.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(c->miso_port, &g);
+  GPIO_TypeDef *const p = c->miso_port;
+  const uint8_t ps = miso_pin_pos(c->miso_pin);
+  const uint32_t m2 = 3uL << (uint32_t)(ps * 2u);
+  p->MODER = (p->MODER & ~m2) | (0uL << (uint32_t)(ps * 2u));
+  const uint32_t pup = 3uL << (uint32_t)(ps * 2u);
+  p->PUPDR = (p->PUPDR & ~pup) | (1uL << (uint32_t)(ps * 2u));
+  const uint32_t spd = 3uL << (uint32_t)(ps * 2u);
+  p->OSPEEDR = (p->OSPEEDR & ~spd) | (3uL << (uint32_t)(ps * 2u));
 }
 
+/** Restore MISO to SPI alternate function; register-only for low latency before SCLK. */
 static void ch_miso_restore_af(const ads127_ch_ctx_t *c)
 {
-  GPIO_InitTypeDef g = {0};
-  g.Pin = c->miso_pin;
-  g.Mode = GPIO_MODE_AF_PP;
-  g.Pull = GPIO_NOPULL;
-  g.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  g.Alternate = c->miso_af;
-  HAL_GPIO_Init(c->miso_port, &g);
+  GPIO_TypeDef *const p = c->miso_port;
+  const uint8_t ps = miso_pin_pos(c->miso_pin);
+  const uint32_t af = (uint32_t)c->miso_af & 0xFuL;
+  const uint32_t m2 = 3uL << (uint32_t)(ps * 2u);
+  p->MODER = (p->MODER & ~m2) | (2uL << (uint32_t)(ps * 2u));
+  const uint32_t pup = 3uL << (uint32_t)(ps * 2u);
+  p->PUPDR = (p->PUPDR & ~pup);
+  const uint32_t spd = 3uL << (uint32_t)(ps * 2u);
+  p->OSPEEDR = (p->OSPEEDR & ~spd) | (3uL << (uint32_t)(ps * 2u));
+  p->OTYPER &= ~((uint32_t)c->miso_pin);
+  if (ps < 8u) {
+    const uint32_t m = 0xFuL << (uint32_t)(ps * 4u);
+    p->AFR[0] = (p->AFR[0] & ~m) | (af << (uint32_t)(ps * 4u));
+  } else {
+    const uint8_t sh = (uint8_t)(ps - 8u);
+    const uint32_t m = 0xFuL << (uint32_t)(sh * 4u);
+    p->AFR[1] = (p->AFR[1] & ~m) | (af << (uint32_t)(sh * 4u));
+  }
 }
 
-/* Only call HAL_GetTick every (mask+1) polls — tick dominates loop time vs IDR read. */
-#define MISO_POLL_TICK_MASK 0x1FFu
+static uint8_t g_ads127_dwt_poll_on;
+
+static void ads127_dwt_poll_ensure(void)
+{
+  if (g_ads127_dwt_poll_on != 0u) {
+    return;
+  }
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CYCCNT = 0;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+  g_ads127_dwt_poll_on = 1u;
+}
+
+static uint32_t ads127_ms_to_dwt_cycles(uint32_t ms)
+{
+  return (uint32_t)(((uint64_t)ms * (uint64_t)SystemCoreClock) / 1000ULL);
+}
+
+/**
+ * H7 SPI v2: 8-bit bidirectional 3×0x00 read without `HAL_SPI_TransmitReceive` lock/state churn.
+ * Caller must have left SPE enabled and 2-line 8-bit master mode configured.
+ */
+static HAL_StatusTypeDef spi_master_rx3_zero_tx_unlocked(SPI_HandleTypeDef *hs, uint8_t rx[3], uint32_t xfer_timeout_ms)
+{
+  static const uint8_t kz[3] = {0u, 0u, 0u};
+#if PAT_ADS127_SPI_HAL_LEGACY
+  SPI_TypeDef *const SPIx = hs->Instance;
+
+  if ((hs->State != HAL_SPI_STATE_READY) || (hs->Init.DataSize != SPI_DATASIZE_8BIT)
+      || (hs->Init.Direction != SPI_DIRECTION_2LINES) || (hs->Init.Mode != SPI_MODE_MASTER)) {
+    return HAL_SPI_TransmitReceive(hs, kz, rx, 3u, xfer_timeout_ms);
+  }
+
+  const uint32_t tick0 = HAL_GetTick();
+  uint16_t tx_left = 3u;
+  uint16_t rx_left = 3u;
+  const uint32_t fifo_len = IS_SPI_HIGHEND_INSTANCE(SPIx) ? SPI_HIGHEND_FIFO_SIZE : SPI_LOWEND_FIFO_SIZE;
+  const uint16_t fifo_pkt = (uint16_t)(((uint16_t)(hs->Init.FifoThreshold >> 5U) + 1U));
+  uint8_t *prx = rx;
+
+  MODIFY_REG(SPIx->CR2, SPI_CR2_TSIZE, 3uL);
+  SET_BIT(SPIx->CR1, SPI_CR1_CSTART);
+
+  while ((tx_left > 0u) || (rx_left > 0u)) {
+    if (__HAL_SPI_GET_FLAG(hs, SPI_FLAG_TXP) && (tx_left > 0u) && (rx_left < (tx_left + fifo_len))) {
+      *((__IO uint8_t *)&SPIx->TXDR) = 0u;
+      tx_left--;
+    }
+    const uint32_t sr = SPIx->SR;
+    if (rx_left > 0u) {
+      if (__HAL_SPI_GET_FLAG(hs, SPI_FLAG_RXP)) {
+        *prx++ = *((__IO uint8_t *)&SPIx->RXDR);
+        rx_left--;
+      } else if ((rx_left < fifo_pkt) && ((sr & SPI_SR_RXWNE_Msk) != 0UL)) {
+        *prx++ = *((__IO uint8_t *)&SPIx->RXDR);
+        rx_left--;
+      } else if ((rx_left < 4u) && ((sr & SPI_SR_RXPLVL_Msk) != 0UL)) {
+        *prx++ = *((__IO uint8_t *)&SPIx->RXDR);
+        rx_left--;
+      } else {
+        if ((xfer_timeout_ms != HAL_MAX_DELAY) && ((HAL_GetTick() - tick0) > xfer_timeout_ms)) {
+          goto spi_cleanup_fail;
+        }
+      }
+    }
+  }
+
+  while (!__HAL_SPI_GET_FLAG(hs, SPI_FLAG_EOT)) {
+    if ((xfer_timeout_ms != HAL_MAX_DELAY) && ((HAL_GetTick() - tick0) > xfer_timeout_ms)) {
+      goto spi_cleanup_fail;
+    }
+  }
+
+  __HAL_SPI_CLEAR_EOTFLAG(hs);
+  __HAL_SPI_CLEAR_TXTFFLAG(hs);
+  __HAL_SPI_DISABLE(hs);
+  __HAL_SPI_DISABLE_IT(hs, (SPI_IT_EOT | SPI_IT_TXP | SPI_IT_RXP | SPI_IT_DXP | SPI_IT_UDR | SPI_IT_OVR
+                            | SPI_IT_FRE | SPI_IT_MODF));
+  CLEAR_BIT(SPIx->CFG1, SPI_CFG1_TXDMAEN | SPI_CFG1_RXDMAEN);
+  MODIFY_REG(SPIx->CR2, SPI_CR2_TSIZE, 0UL);
+  return HAL_OK;
+
+spi_cleanup_fail:
+  MODIFY_REG(SPIx->CR2, SPI_CR2_TSIZE, 0UL);
+  __HAL_SPI_CLEAR_EOTFLAG(hs);
+  __HAL_SPI_CLEAR_TXTFFLAG(hs);
+  __HAL_SPI_DISABLE(hs);
+  __HAL_SPI_DISABLE_IT(hs, (SPI_IT_EOT | SPI_IT_TXP | SPI_IT_RXP | SPI_IT_DXP | SPI_IT_UDR | SPI_IT_OVR
+                            | SPI_IT_FRE | SPI_IT_MODF));
+  CLEAR_BIT(SPIx->CFG1, SPI_CFG1_TXDMAEN | SPI_CFG1_RXDMAEN);
+  return HAL_TIMEOUT;
+#else
+  if ((hs->State != HAL_SPI_STATE_READY) || (hs->Init.DataSize != SPI_DATASIZE_8BIT)
+      || (hs->Init.Direction != SPI_DIRECTION_2LINES) || (hs->Init.Mode != SPI_MODE_MASTER)) {
+    return HAL_SPI_TransmitReceive(hs, kz, rx, 3u, xfer_timeout_ms);
+  }
+
+  pat_spi_master_cfg_t pcfg;
+  pat_spi_h7_master_cfg_from_hspi(hs, &pcfg);
+  const uint32_t cyc = (xfer_timeout_ms == HAL_MAX_DELAY) ? UINT32_MAX : ads127_ms_to_dwt_cycles(xfer_timeout_ms);
+  return pat_spi_h7_master_txrx(hs->Instance, &pcfg, kz, rx, 3u, cyc);
+#endif
+}
 
 void ads127_ch_ctx_bind(ads127_ch_ctx_t *ctx, unsigned ch_index, SPI_HandleTypeDef *hspi)
 {
@@ -164,19 +319,35 @@ void ads127_pins_init(void)
   /* One HAL_GPIO_Init per !CS so PA15/PB4 leave debug AF cleanly (J1 quartet). */
   g.Pin = PAT_PINMAP_SPI1_NCS_PIN;
   HAL_GPIO_Init(PAT_PINMAP_SPI1_NCS_PORT, &g);
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  HAL_GPIO_WritePin(PAT_PINMAP_SPI1_NCS_PORT, PAT_PINMAP_SPI1_NCS_PIN, GPIO_PIN_RESET);
+#else
   HAL_GPIO_WritePin(PAT_PINMAP_SPI1_NCS_PORT, PAT_PINMAP_SPI1_NCS_PIN, GPIO_PIN_SET);
+#endif
 
   g.Pin = PAT_PINMAP_SPI3_NCS_PIN;
   HAL_GPIO_Init(PAT_PINMAP_SPI3_NCS_PORT, &g);
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  HAL_GPIO_WritePin(PAT_PINMAP_SPI3_NCS_PORT, PAT_PINMAP_SPI3_NCS_PIN, GPIO_PIN_RESET);
+#else
   HAL_GPIO_WritePin(PAT_PINMAP_SPI3_NCS_PORT, PAT_PINMAP_SPI3_NCS_PIN, GPIO_PIN_SET);
+#endif
 
   g.Pin = PAT_PINMAP_SPI2_NCS_PIN;
   HAL_GPIO_Init(PAT_PINMAP_SPI2_NCS_PORT, &g);
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  HAL_GPIO_WritePin(PAT_PINMAP_SPI2_NCS_PORT, PAT_PINMAP_SPI2_NCS_PIN, GPIO_PIN_RESET);
+#else
   HAL_GPIO_WritePin(PAT_PINMAP_SPI2_NCS_PORT, PAT_PINMAP_SPI2_NCS_PIN, GPIO_PIN_SET);
+#endif
 
   g.Pin = PAT_PINMAP_SPI4_NCS_PIN;
   HAL_GPIO_Init(PAT_PINMAP_SPI4_NCS_PORT, &g);
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  HAL_GPIO_WritePin(PAT_PINMAP_SPI4_NCS_PORT, PAT_PINMAP_SPI4_NCS_PIN, GPIO_PIN_RESET);
+#else
   HAL_GPIO_WritePin(PAT_PINMAP_SPI4_NCS_PORT, PAT_PINMAP_SPI4_NCS_PIN, GPIO_PIN_SET);
+#endif
 
   g.Pin = PIN_RST | PIN_START;
   HAL_GPIO_Init(PORT_RST, &g);
@@ -186,6 +357,10 @@ void ads127_pins_init(void)
 
 void ads127_cs_probe_pulse_ms(uint32_t ms_low)
 {
+#if PAT_ADS127_SPI_3WIRE_CS_HELD_LOW
+  (void)ms_low;
+  return;
+#else
   /* SPI4 !CS (PE11) only — LA / continuity before SPI clocks (single-channel bring-up aid). */
   HAL_GPIO_WritePin(PAT_PINMAP_SPI4_NCS_PORT, PAT_PINMAP_SPI4_NCS_PIN, GPIO_PIN_SET);
   HAL_Delay(2u);
@@ -194,6 +369,7 @@ void ads127_cs_probe_pulse_ms(uint32_t ms_low)
     HAL_Delay(ms_low);
   }
   HAL_GPIO_WritePin(PAT_PINMAP_SPI4_NCS_PORT, PAT_PINMAP_SPI4_NCS_PIN, GPIO_PIN_SET);
+#endif
 }
 
 void ads127_nreset_pulse(void)
@@ -213,7 +389,19 @@ static HAL_StatusTypeDef spi_x_ch(const ads127_ch_ctx_t *ch, const uint8_t *tx, 
 {
   ch_cs_low(ch);
   delay_short();
-  HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(ch->hspi, (uint8_t *)tx, rx, len, 200u);
+  HAL_StatusTypeDef st;
+#if PAT_ADS127_SPI_HAL_LEGACY
+  st = HAL_SPI_TransmitReceive(ch->hspi, (uint8_t *)tx, rx, len, 200u);
+#else
+  if ((ch->hspi->State != HAL_SPI_STATE_READY) || (ch->hspi->Init.DataSize != SPI_DATASIZE_8BIT)
+      || (ch->hspi->Init.Direction != SPI_DIRECTION_2LINES) || (ch->hspi->Init.Mode != SPI_MODE_MASTER)) {
+    st = HAL_SPI_TransmitReceive(ch->hspi, (uint8_t *)tx, rx, len, 200u);
+  } else {
+    pat_spi_master_cfg_t pcfg;
+    pat_spi_h7_master_cfg_from_hspi(ch->hspi, &pcfg);
+    st = pat_spi_h7_master_txrx(ch->hspi->Instance, &pcfg, tx, rx, len, ads127_ms_to_dwt_cycles(200u));
+  }
+#endif
   delay_short();
   ch_cs_high(ch);
   return st;
@@ -306,12 +494,10 @@ HAL_StatusTypeDef ads127_shadow_refresh(SPI_HandleTypeDef *hspi, ads127_shadow_t
   return st;
 }
 
-int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *dg)
+int ads127_bringup_no_nreset(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *dg)
 {
   int err = 0;
   dg->fault_mask = 0u;
-
-  ads127_nreset_pulse();
 
   uint8_t v;
   if (ads127_rreg(hspi, ADS127_REG_DEV_ID, &v) != HAL_OK) {
@@ -370,12 +556,13 @@ int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *
     return -7;
   }
   ads127_start_set(0);
-  if (ads127_wreg(hspi, ADS127_REG_CONFIG3, 0x03u) != HAL_OK) {
+  if (ads127_wreg(hspi, ADS127_REG_CONFIG3, ADS127_CONFIG3_FILTER_WIDEBAND_OSR512) != HAL_OK) {
     dg->fault_mask |= 1u << 7;
     err = -8;
   } else {
     uint8_t c3_rb = 0;
-    if (ads127_rreg(hspi, ADS127_REG_CONFIG3, &c3_rb) == HAL_OK && ((c3_rb & 0x1Fu) != 0x03u)) {
+    if (ads127_rreg(hspi, ADS127_REG_CONFIG3, &c3_rb) == HAL_OK
+        && ((c3_rb & 0x1Fu) != ADS127_CONFIG3_FILTER_WIDEBAND_OSR512)) {
       dg->fault_mask |= 1u << 12;
       err = -8;
     }
@@ -389,6 +576,12 @@ int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *
     }
   }
   return err;
+}
+
+int ads127_bringup(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh, ads127_diag_t *dg)
+{
+  ads127_nreset_pulse();
+  return ads127_bringup_no_nreset(hspi, sh, dg);
 }
 
 int ads127_bringup_ok(int bringup_err, uint32_t fault_mask)
@@ -436,7 +629,7 @@ void ads127_print_fault_mask(uint32_t m)
     printf("[11]CFG2_no_SDO_MODE_readback ");
   }
   if ((m & (1u << 12)) != 0u) {
-    printf("[12]CFG3_FILTER_neq_OS256 ");
+    printf("[12]CFG3_FILTER_neq_OS512 ");
   }
   if ((m & (1u << 13)) != 0u) {
     printf("[13]shadow_all_zero_suspect_float ");
@@ -467,6 +660,7 @@ int ads127_post_start_gate(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh)
 {
   /* RREG during active conversion can corrupt readback (SPI3: CONFIG2/4 zero, CONFIG3 OK). Hold
    * START low so SDO is not in DRDY/data mode, refresh shadow, then restore START for streaming. */
+  ads127_ncs_all_high();
   ads127_start_set(0);
   HAL_Delay(3u);
 
@@ -480,7 +674,8 @@ int ads127_post_start_gate(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh)
       return -1;
     }
     const int all_zero = (sh->dev_id == 0u && sh->rev_id == 0u && sh->status == 0u && sh->config4 == 0u);
-    if (!all_zero && (sh->config4 & 0x80u) != 0u && (sh->config3 & 0x1Fu) == 0x03u && (sh->config2 & 0x20u) != 0u) {
+    if (!all_zero && (sh->config4 & 0x80u) != 0u && (sh->config3 & 0x1Fu) == ADS127_CONFIG3_FILTER_WIDEBAND_OSR512
+        && (sh->config2 & 0x20u) != 0u) {
       ads127_start_set(1);
       HAL_Delay(ADS127_START_STREAM_SETTLE_MS);
       return 0;
@@ -491,7 +686,7 @@ int ads127_post_start_gate(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh)
   if ((sh->config4 & 0x80u) == 0u) {
     return -2;
   }
-  if ((sh->config3 & 0x1Fu) != 0x03u) {
+  if ((sh->config3 & 0x1Fu) != ADS127_CONFIG3_FILTER_WIDEBAND_OSR512) {
     return -3;
   }
   if ((sh->config2 & 0x20u) == 0u) {
@@ -505,6 +700,7 @@ int ads127_post_start_gate(SPI_HandleTypeDef *hspi, ads127_shadow_t *sh)
 
 void ads127_after_failed_post_start_gate(void)
 {
+  ads127_ncs_all_high();
   ads127_start_set(0);
   HAL_Delay(2u);
   ads127_start_set(1);
@@ -513,6 +709,7 @@ void ads127_after_failed_post_start_gate(void)
 
 void ads127_halt_streaming_fault(const char *msg)
 {
+  ads127_ncs_all_high();
   ads127_start_set(0);
   printf("\r\nADS127 HALT (START off, no streaming): %s\r\n", msg);
   for (;;) {
@@ -527,7 +724,6 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
     uint32_t timeout_ms,
     ads127_diag_t *dg)
 {
-  const uint32_t t0 = HAL_GetTick();
   ch_cs_low(ch);
   delay_after_cs_100ns();
 
@@ -537,13 +733,14 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
   ch_miso_enter_gpio_input(ch);
   dg->drdy_skipped_arm_high = (ch_miso_high_raw(ch) == 0u) ? 1u : 0u;
   {
-    uint32_t iter = 0u;
+    ads127_dwt_poll_ensure();
+    const uint32_t cyc_lim = ads127_ms_to_dwt_cycles(timeout_ms);
+    const uint32_t c0 = DWT->CYCCNT;
     for (;;) {
       if (ch_miso_high_raw(ch) == 0u) {
         break;
       }
-      iter++;
-      if ((iter & MISO_POLL_TICK_MASK) == 0u && (HAL_GetTick() - t0) > timeout_ms) {
+      if ((uint32_t)(DWT->CYCCNT - c0) > cyc_lim) {
         ch_miso_restore_af(ch);
         __HAL_SPI_ENABLE(hs);
         __DSB();
@@ -557,9 +754,8 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
   __HAL_SPI_ENABLE(hs);
   __DSB();
 
-  uint8_t tx[3] = { 0, 0, 0 };
   uint8_t rx[3];
-  HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(hs, tx, rx, 3u, 200u);
+  HAL_StatusTypeDef st = spi_master_rx3_zero_tx_unlocked(hs, rx, 200u);
   ch_cs_high(ch);
   if (st == HAL_OK) {
     out24[0] = rx[0];
@@ -590,25 +786,283 @@ uint32_t ads127_get_quartet_acquired_count(void)
   return ads127_quartet_acquired_count;
 }
 
+#if PAT_QUARTET_PARALLEL_DRDY_WAIT
+
+/** Undo quartet parallel arm: MISO AF + SPI enable for `from`..3, then !CS high (batched when `from==0`). */
+static void quartet_release_armed_from(ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS], unsigned from)
+{
+  for (unsigned j = from; j < ADS127_QUARTET_CHANNELS; j++) {
+    const ads127_ch_ctx_t *ch = &ctxs[j];
+    SPI_HandleTypeDef *const hs = ch->hspi;
+    ch_miso_restore_af(ch);
+    __HAL_SPI_ENABLE(hs);
+    __DSB();
+  }
+  if (from == 0u) {
+    quartet_ncs_all_deassert_bsrr();
+  } else {
+    for (unsigned j = from; j < ADS127_QUARTET_CHANNELS; j++) {
+      ch_cs_high(&ctxs[j]);
+    }
+  }
+}
+
+/** IT buffers: valid until all four `HAL_SPI_TransmitReceive_IT` completions. */
+static uint8_t gq_spi_tx[ADS127_QUARTET_CHANNELS][3];
+static uint8_t gq_spi_rx[ADS127_QUARTET_CHANNELS][3];
+
+#if (!defined(PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER) || (PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER == 0))        \
+    && (!defined(PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED) || (PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED == 0))
+
+static HAL_StatusTypeDef quartet_poll_all_spi_ready(
+    ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],
+    uint32_t timeout_ms)
+{
+  const uint32_t t0 = HAL_GetTick();
+  for (;;) {
+    unsigned all_ready = 1u;
+    for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+      if (HAL_SPI_GetState(ctxs[i].hspi) != HAL_SPI_STATE_READY) {
+        all_ready = 0u;
+        break;
+      }
+    }
+    if (all_ready != 0u) {
+      return HAL_OK;
+    }
+    if ((HAL_GetTick() - t0) > timeout_ms) {
+      return HAL_TIMEOUT;
+    }
+  }
+}
+
+static void quartet_abort_all_spi(ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS])
+{
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    (void)HAL_SPI_Abort_IT(ctxs[i].hspi);
+  }
+  (void)quartet_poll_all_spi_ready(ctxs, 50u);
+}
+
+#endif
+
+/** Assert all four J1 !CS (active low): SPI1+SPI3 on one GPIOA BSRR; SPI2 PB4; SPI4 PE11. */
+static void quartet_ncs_all_assert_bsrr(void)
+{
+  const uint32_t a_cs = (uint32_t)PAT_PINMAP_SPI1_NCS_PIN | (uint32_t)PAT_PINMAP_SPI3_NCS_PIN;
+  PAT_PINMAP_SPI1_NCS_PORT->BSRR = a_cs << 16u;
+  PAT_PINMAP_SPI2_NCS_PORT->BSRR = (uint32_t)PAT_PINMAP_SPI2_NCS_PIN << 16u;
+  PAT_PINMAP_SPI4_NCS_PORT->BSRR = (uint32_t)PAT_PINMAP_SPI4_NCS_PIN << 16u;
+}
+
+#if PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED
+/**
+ * With all four !CS already asserted: SPI1→SPI4 sequential `spi_master_rx3_zero_tx_unlocked`
+ * (TSIZE/CSTART/EOT via `pat_spi_h7_master_txrx` — same as single-channel; no HAL SPI IT).
+ */
+static HAL_StatusTypeDef quartet_sample_seq_rx3_unlocked(
+    ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],
+    uint8_t gq_spi_rx[ADS127_QUARTET_CHANNELS][3],
+    uint8_t out24[ADS127_QUARTET_CHANNELS][3],
+    ads127_diag_t dg[ADS127_QUARTET_CHANNELS])
+{
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    __HAL_SPI_ENABLE(ctxs[i].hspi);
+    __DSB();
+    HAL_StatusTypeDef st = spi_master_rx3_zero_tx_unlocked(ctxs[i].hspi, gq_spi_rx[i], 200u);
+    if (st != HAL_OK) {
+      quartet_ncs_all_deassert_bsrr();
+      for (unsigned k = 0u; k < ADS127_QUARTET_CHANNELS; k++) {
+        out24[k][0] = 0xFFu;
+        out24[k][1] = 0xFFu;
+        out24[k][2] = 0xFFu;
+      }
+      memset(dg, 0, sizeof(ads127_diag_t) * ADS127_QUARTET_CHANNELS);
+      return st;
+    }
+  }
+  return HAL_OK;
+}
+#endif
+
+static HAL_StatusTypeDef read_quartet_blocking_parallel(
+    ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],
+    uint8_t out24[ADS127_QUARTET_CHANNELS][3],
+    uint32_t timeout_ms,
+    ads127_diag_t dg[ADS127_QUARTET_CHANNELS])
+{
+#if !PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
+  uint8_t drdy_ready[ADS127_QUARTET_CHANNELS] = {0};
+#endif
+  uint8_t arm_skip_snap[ADS127_QUARTET_CHANNELS];
+  quartet_ncs_all_assert_bsrr();
+  delay_after_cs_100ns();
+#if PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
+  /* DRDY gate reads SPI4 MISO only — only SPI4 needs SPE off + GPIO MISO for reliable IDR poll. */
+  for (unsigned i = 0u; i < 3u; i++) {
+    dg[i].drdy_skipped_arm_high = 0u;
+    arm_skip_snap[i] = 0u;
+  }
+  {
+    SPI_HandleTypeDef *const hs = ctxs[3].hspi;
+    __HAL_SPI_DISABLE(hs);
+    __DSB();
+    ch_miso_enter_gpio_input(&ctxs[3]);
+    dg[3].drdy_skipped_arm_high = (ch_miso_high_raw(&ctxs[3]) == 0u) ? 1u : 0u;
+    arm_skip_snap[3] = dg[3].drdy_skipped_arm_high;
+  }
+#else
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    SPI_HandleTypeDef *const hs = ctxs[i].hspi;
+    __HAL_SPI_DISABLE(hs);
+    __DSB();
+    ch_miso_enter_gpio_input(&ctxs[i]);
+    dg[i].drdy_skipped_arm_high = (ch_miso_high_raw(&ctxs[i]) == 0u) ? 1u : 0u;
+    arm_skip_snap[i] = dg[i].drdy_skipped_arm_high;
+  }
+#endif
+
+  ads127_dwt_poll_ensure();
+  const uint32_t cyc_lim = ads127_ms_to_dwt_cycles(timeout_ms);
+  const uint32_t c0 = DWT->CYCCNT;
+  for (;;) {
+#if PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
+    if (ch_miso_high_raw(&ctxs[3]) == 0u) {
+      break;
+    }
+#else
+    for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+      if (drdy_ready[i] == 0u && ch_miso_high_raw(&ctxs[i]) == 0u) {
+        drdy_ready[i] = 1u;
+      }
+    }
+    if (drdy_ready[0u] != 0u && drdy_ready[1u] != 0u && drdy_ready[2u] != 0u && drdy_ready[3u] != 0u) {
+      break;
+    }
+#endif
+    if ((uint32_t)(DWT->CYCCNT - c0) > cyc_lim) {
+      quartet_release_armed_from(ctxs, 0u);
+      for (unsigned k = 0u; k < ADS127_QUARTET_CHANNELS; k++) {
+        out24[k][0] = 0xFFu;
+        out24[k][1] = 0xFFu;
+        out24[k][2] = 0xFFu;
+      }
+      memset(dg, 0, sizeof(ads127_diag_t) * ADS127_QUARTET_CHANNELS);
+      for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+        dg[i].drdy_skipped_arm_high = arm_skip_snap[i];
+#if PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
+        if (i == 3u && ch_miso_high_raw(&ctxs[3]) != 0u) {
+          dg[i].drdy_timeouts = 1u;
+        }
+#else
+        if (drdy_ready[i] == 0u) {
+          dg[i].drdy_timeouts = 1u;
+        }
+#endif
+      }
+      return HAL_TIMEOUT;
+    }
+  }
+
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    const ads127_ch_ctx_t *ch = &ctxs[i];
+    ch_miso_restore_af(ch);
+    __HAL_SPI_ENABLE(ch->hspi);
+    __DSB();
+  }
+
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    gq_spi_tx[i][0] = 0u;
+    gq_spi_tx[i][1] = 0u;
+    gq_spi_tx[i][2] = 0u;
+  }
+
+#if PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED
+  /* Characterisation: four sequential H7 SPIv2 unlocked 3-byte reads (no parallel IT overlap). */
+  {
+    HAL_StatusTypeDef st = quartet_sample_seq_rx3_unlocked(ctxs, gq_spi_rx, out24, dg);
+    if (st != HAL_OK) {
+      return st;
+    }
+  }
+#elif defined(PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER) && (PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER != 0)
+  /* Interleaved H7 SPIv2 on SPI1..4 (`pat_spi_h7_master.c`): overlapping SCLK vs one-bus-at-a-time seq path. */
+  {
+    const uint32_t cyc_sample = ads127_ms_to_dwt_cycles(200u);
+    HAL_StatusTypeDef st = pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi(ctxs[0].hspi, ctxs[1].hspi, ctxs[2].hspi,
+        ctxs[3].hspi, gq_spi_rx[0], gq_spi_rx[1], gq_spi_rx[2], gq_spi_rx[3], cyc_sample);
+    if (st != HAL_OK) {
+      quartet_ncs_all_deassert_bsrr();
+      for (unsigned k = 0u; k < ADS127_QUARTET_CHANNELS; k++) {
+        out24[k][0] = 0xFFu;
+        out24[k][1] = 0xFFu;
+        out24[k][2] = 0xFFu;
+      }
+      memset(dg, 0, sizeof(ads127_diag_t) * ADS127_QUARTET_CHANNELS);
+      return st;
+    }
+  }
+#else
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    HAL_StatusTypeDef st =
+        HAL_SPI_TransmitReceive_IT(ctxs[i].hspi, gq_spi_tx[i], gq_spi_rx[i], 3u);
+    if (st != HAL_OK) {
+      quartet_abort_all_spi(ctxs);
+      quartet_ncs_all_deassert_bsrr();
+      for (unsigned k = 0u; k < ADS127_QUARTET_CHANNELS; k++) {
+        out24[k][0] = 0xFFu;
+        out24[k][1] = 0xFFu;
+        out24[k][2] = 0xFFu;
+      }
+      memset(dg, 0, sizeof(ads127_diag_t) * ADS127_QUARTET_CHANNELS);
+      return st;
+    }
+  }
+
+  HAL_StatusTypeDef wst = quartet_poll_all_spi_ready(ctxs, 200u);
+  if (wst != HAL_OK) {
+    quartet_abort_all_spi(ctxs);
+    quartet_ncs_all_deassert_bsrr();
+    for (unsigned k = 0u; k < ADS127_QUARTET_CHANNELS; k++) {
+      out24[k][0] = 0xFFu;
+      out24[k][1] = 0xFFu;
+      out24[k][2] = 0xFFu;
+    }
+    memset(dg, 0, sizeof(ads127_diag_t) * ADS127_QUARTET_CHANNELS);
+    return wst;
+  }
+#endif
+
+  quartet_ncs_all_deassert_bsrr();
+
+  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
+    out24[i][0] = gq_spi_rx[i][0];
+    out24[i][1] = gq_spi_rx[i][1];
+    out24[i][2] = gq_spi_rx[i][2];
+    dg[i].last_sample_u32_be = ((uint32_t)gq_spi_rx[i][0] << 16) | ((uint32_t)gq_spi_rx[i][1] << 8)
+        | (uint32_t)gq_spi_rx[i][2];
+  }
+
+  ads127_quartet_acquired_count++;
+  return HAL_OK;
+}
+
+#endif /* PAT_QUARTET_PARALLEL_DRDY_WAIT */
+
 HAL_StatusTypeDef ads127_read_quartet_blocking(
     ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS],
     uint8_t out24[ADS127_QUARTET_CHANNELS][3],
     uint32_t timeout_ms,
     ads127_diag_t dg[ADS127_QUARTET_CHANNELS])
 {
-  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
-    HAL_StatusTypeDef st =
-        ads127_read_sample24_ch_blocking(&ctxs[i], out24[i], timeout_ms, &dg[i]);
-    if (st != HAL_OK) {
-      for (unsigned k = i + 1u; k < ADS127_QUARTET_CHANNELS; k++) {
-        out24[k][0] = 0xFFu;
-        out24[k][1] = 0xFFu;
-        out24[k][2] = 0xFFu;
-        memset(&dg[k], 0, sizeof(dg[k]));
-      }
-      return st;
-    }
-  }
-  ads127_quartet_acquired_count++;
-  return HAL_OK;
+#if PAT_QUARTET_PARALLEL_DRDY_WAIT
+  ads127_ncs_all_high();
+  return read_quartet_blocking_parallel(ctxs, out24, timeout_ms, dg);
+#else
+  (void)ctxs;
+  (void)out24;
+  (void)timeout_ms;
+  (void)dg;
+  return HAL_ERROR;
+#endif
 }

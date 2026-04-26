@@ -4,8 +4,8 @@
 #include "stm32h7xx_hal.h"
 
 /**
- * SPI1–3: SPI123 kernel /64 ~6.25 MHz SCLK. SPI4: SPI4 kernel /16 ~6.25 MHz.
- * Matches quartet / single-bus / SPI1–4 scan apps.
+ * SPI1–3: default SPI123 kernel **÷64** (override on `pat_nucleo_quartet` via CMake `PAT_SPI123_PRESCALER_DIV`).
+ * SPI4: SPI4 kernel **÷16**. Other ELFs use defaults here.
  */
 uint32_t pat_spi_ads127_prescaler_for_instance(const SPI_TypeDef *instance);
 

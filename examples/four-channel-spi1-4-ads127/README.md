@@ -1,6 +1,17 @@
 # Four-channel SPI1–4 + ADS127L11 (quartet read)
 
-Firmware target: **`pat_nucleo_quartet`** (`src/main_quartet.c`). One **epoch** = one sample vector **`raw[4]`** read in fixed MCU order **SPI1 → SPI2 → SPI3 → SPI4** (same as [`AGENTS.md`](../../AGENTS.md) `quartet_order`). Only one `!CS` is active per SPI transaction; all `HAL_SPI_*` calls run from the main loop (cooperative “threads”, no RTOS).
+Firmware target: **`pat_nucleo_quartet`** (`src/main_quartet.c`). One **epoch** = one sample vector **`raw[4]`** for logical ch0..3 (SPI1..SPI4 per [`AGENTS.md`](../../AGENTS.md) `quartet_order`). The quartet image **always** uses shared **`!CS`** (**`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`**): all four **`!CS`** are **low together** for the DRDY wait and sample phase, then deasserted (4-wire). Per-channel sequential quartet (`ads127_read_sample24_ch_blocking` in a loop) is **not** a shipped mode. No RTOS.
+
+### Parallel sample phase: register SPI (default) vs HAL IT (bisect)
+
+- **Default (`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=ON`):** after the shared DRDY gate, the 3-byte read uses **`pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi`** — **interleaved** `TXDR`/`RXDR` polling on **SPI1..SPI4** so **SCLK can overlap on all buses** without **`HAL_SPI_TransmitReceive_IT`** or SPI NVIC for data (see [`src/pat_spi_h7_master.c`](../../src/pat_spi_h7_master.c), [`src/ads127l11.c`](../../src/ads127l11.c) `read_quartet_blocking_parallel`). RREG/WREG use **`pat_spi_h7_master_txrx`** unless the image is built with **`-DPAT_ADS127_SPI_HAL_LEGACY=ON`** (same CMake option as other PAT ELFs).
+- **Bisect / legacy parallel IT:** configure CMake with **`-DPAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=OFF`** then rebuild — restores **`HAL_SPI_TransmitReceive_IT`** + **`pat_quartet_spi_irq.c`** NVIC path.
+
+**LA sign-off (parallel default):** during the post-DRDY 3-byte window, verify **SCLK on SPI1, SPI2, SPI3, and SPI4** all toggle in a **common time window** (compare to a capture with **`REGISTER_MASTER=OFF`** on the same HAT). UART **`EPOCH` / `epoch_hz_est`**, **`quartets_ok`**, and per-channel **`to` / `arm_skip`** should stay in the same class as the IT baseline.
+
+**LA looks “dead” / no SCLK:** (1) Trigger on **any** `!CS` (all four fall together in parallel 4-wire) — SCLK is **bursty** (~24 edges per 3-byte read), not a free-running clock. (2) With **`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=OFF`**, the epoch waits until **all four** MISO/DRDY lines indicate ready; a missing or stuck-high channel ⇒ **40 ms** `QUARTET_DRDY_TIMEOUT_MS` loops with **no** sample SCLK — use **`-DPAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=ON`** if only SPI4 MISO is valid. (3) Confirm VCP: **`to`** (DRDY timeout) and **`quartet_fail_total`** vs **`quartets_ok_total`**.
+
+**SPI4-only gate (`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=ON`):** only **SPI4** MISO is taken through **`SPE` off** + GPIO input for the DRDY wait; UART **`arm_skip` on ch0–2** is always **0** (not part of the gate — see `read_quartet_blocking_parallel` in [`src/ads127l11.c`](../../src/ads127l11.c)).
 
 ## J1 routing (legacy HAT 86euv89y8)
 
@@ -17,11 +28,25 @@ Shared nets: **PF0** `nRESET`, **PF1** **START** (all four converters). **CLK** 
 
 - **Multi-device:** program **each** die on its own SPI/`!CS`; keep mode-related registers aligned where the data sheet requires it, then assert **START** once for the shared net.
 - **`CONFIG2.START_MODE`:** **`00b`** = start/stop (START high runs conversions until low) — default in [`src/ads127l11.c`](../../src/ads127l11.c) bring-up. **`10b`** = *synchronised control*: rising edge on **START** aligns the digital filter; continuous conversion thereafter — use when you need TI’s synchronised-filter semantics, not the same as simple **`00b`** streaming.
-- **Nominal ODR:** see [`AGENTS.md`](../../AGENTS.md) `runtime` TOON (~48.8 ksps class at 25 MHz modulator clock, wideband OSR256); exact value from SBAS946 tables ± crystal tolerance.
+- **Nominal ODR:** see [`AGENTS.md`](../../AGENTS.md) `runtime` TOON (~24.4 ksps class at 25 MHz modulator clock, wideband OSR512); exact value from SBAS946 tables ± crystal tolerance.
+
+## Epoch rate vs nominal ODR (LA + UART)
+
+- **Nominal ODR** (~24.4 kS/s per ADS127 with default external CLK + OSR512 wideband) is set by the **converter**, not the UART summary period (`PAT_QUARTET_SYNC_SUMMARY_MS`).
+- **Achieved quartet epoch rate** is how fast `ads127_read_quartet_blocking` returns in [`main_quartet.c`](../../src/main_quartet.c): there is **no TIM6** gate in the quartet image, so the main `for (;;)` loop runs **one epoch per iteration**. If SPI + DRDY polling + HAL overhead exceed **~20.5 µs**, the **epoch rate** falls below ODR (e.g. logic analyser on **`!CS`** in 4-wire may show **~20–25 kHz** edge rate ≈ **two edges per ~45 µs epoch**).
+- **UART:** each `EPOCH,...` line includes **`span_us`** (DWT delta around `ads127_read_quartet_blocking`) and **`epoch_hz_est`** ≈ **1e6 / span_us** (integer Hz). Compare **`epoch_hz_est`** to your LA when the probe marks **one event per epoch** (e.g. one **!CS** falling edge per channel per epoch in parallel 4-wire).
+- **LA probe cheat sheet (J1, parallel 4-wire):** all four **`!CS`** (PA4, PB4, PA15, PE11) fall together at epoch start and rise together at end; **SCLK** on each bus is **bursty** (24 clocks per 3-byte read), not a continuous ~24.4 kHz square wave; **DRDY/SDO** behaviour depends on **`SDO_MODE`** (see TI SBAS946).
+- **CMake throughput / characterisation** (quartet target only; re-run CMake after changing cache):
+  - **`PAT_SPI123_PRESCALER_DIV`**: `8` \| `16` \| `32` \| `64` (default **64**) — raises SPI1–3 SCLK vs [`pat_spi_ads127.c`](../../src/pat_spi_ads127.c); respect **TI f_SCLK** and SI on the HAT.
+  - **`PAT_QUARTET_SPI_IRQ_PREEMPT_PRIORITY`**: **0–15** (default **6**); lower numeric value = **higher** NVIC urgency on STM32.
+  - **`PAT_QUARTET_DIAG_EPOCH_EVERY=ON`**: prints **`CNT` / `EPOCH` / `CH` every epoch** (UART flood) to correlate with LA without changing `PAT_QUARTET_SYNC_BURST_EPOCHS`.
+  - **`PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED=ON`**: uses **sequential** `spi_master_rx3_zero_tx_unlocked` on SPI1..4 (no parallel IT overlap) — **diagnostic**. Takes precedence over **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER`** for the sample phase.
+  - **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER`**: **ON** (default) = parallel **interleaved register** 3-byte sample; **OFF** = **`HAL_SPI_TransmitReceive_IT`** + SPI IRQ.
+- **Tier B (DMA):** not implemented; gates and alignment notes in [`include/pat_quartet_p4_dma.h`](../../include/pat_quartet_p4_dma.h).
 
 ## GPIO `!CS`
 
-All four **`!CS`** lines are configured as **GPIO outputs, idle high** in **`ads127_pins_init()`** before SPI is used, so inactive buses do not float **CS** during bring-up or single-bus builds.
+By default all four **`!CS`** lines are **GPIO outputs, idle high** in **`ads127_pins_init()`** before SPI is used (exception: **`PAT_ADS127_SPI_3WIRE_CS_HELD_LOW`** holds them **low** — see [`AGENTS.md`](../../AGENTS.md) `quartet_ti_3wire_spi`).
 
 ## STM32H753 silicon notes
 
@@ -36,8 +61,8 @@ Shared helper **[`pat_spi_ads127.c`](../../src/pat_spi_ads127.c)** / **[`include
 
 - **Published epoch line:** [`include/pat_quartet_epoch.h`](../../include/pat_quartet_epoch.h) — `pat_quartet_epoch_line_t` (32-byte aligned `raw24[4][3]` + `epoch_id` / `valid`) for downstream batched processing.
 - **Boot / bring-up:** `BRU`, `SH`, `TI`, `STAT` CSV-style lines (see `pat_quartet_app.c`).
-- **Runtime (throttled, default `PAT_QUARTET_SYNC_SUMMARY_MS` 1000 ms):** `CNT`, `EPOCH` (includes `span_us` from DWT cycle delta), `CH` per channel with `st` / `to` / `arm_skip`. **`summary_ms` is UART cadence only**, not ADC ODR. Optional burst: define **`PAT_QUARTET_SYNC_BURST_EPOCHS`** > 0 at compile time.
-- **Tier B DMA (not enabled):** checklist header [`include/pat_quartet_p4_dma.h`](../../include/pat_quartet_p4_dma.h).
+- **Runtime (throttled, default `PAT_QUARTET_SYNC_SUMMARY_MS` 1000 ms):** `CNT`, `EPOCH` (includes `span_us`, **`epoch_hz_est`**, DWT cycle delta), `CH` per channel with `st` / `to` / `arm_skip`. **`summary_ms` is UART cadence only**, not ADC ODR. Optional burst: define **`PAT_QUARTET_SYNC_BURST_EPOCHS`** > 0 at compile time, or CMake **`PAT_QUARTET_DIAG_EPOCH_EVERY=ON`** for every-epoch lines.
+- **Tier B DMA (not enabled):** checklist header [`include/pat_quartet_p4_dma.h`](../../include/pat_quartet_p4_dma.h) — see § *Epoch rate vs nominal ODR* above.
 
 ## API
 

@@ -11,7 +11,15 @@ This document is the **canonical reference** for the **single-bus** PAT builds: 
 | `pat_nucleo_spi3_ads127` | `-SingleSpi 3` | 3 | 2 |
 | `pat_nucleo_spi4_ads127` | `-SingleSpi 4` | 4 | 3 |
 
-All targets link **`main_single_ads127_spi.c`** + **`ads127l11.c`** + HAL/MSP/clock (`CMakeLists.txt` `foreach` over `bus` 1..4).
+All targets link **`main_single_ads127_spi.c`** + **`ads127l11.c`** + **`pat_spi_h7_master.c`** + HAL/MSP/clock (`CMakeLists.txt` `foreach` over `bus` 1..4).
+
+### HAL-free SPI path (default)
+
+RREG/WREG and the **3-byte** sample burst use **`pat_spi_h7_master_txrx`** (H7 SPI v2 `TSIZE`/`CSTART`/EOT polling, **DWT** timeouts) instead of **`HAL_SPI_TransmitReceive`**, while **`HAL_SPI_Init`** + **`HAL_SPI_MspInit`** still configure the peripheral. MISO **GPIO ↔ AF** for SDO/DRDY remains **register-only** in **`ads127l11.c`**.
+
+### Legacy SPI (bisect)
+
+Reconfigure CMake with **`-DPAT_ADS127_SPI_HAL_LEGACY=ON`** then rebuild — restores **`HAL_SPI_TransmitReceive`** for register frames and the old 3-byte inner loop (`HAL_GetTick` timeouts). Use to compare **`drdy_timeouts`** / **`arm_skip`** (UART) or LA on **!CS → first SCLK** vs default.
 
 ## Hardware (J1)
 
@@ -34,6 +42,7 @@ Pin hints printed at boot (see also **`pat_j1_hint()`** in source):
 |------|------|
 | `src/main_single_ads127_spi.c` | `main()`: `PAT_ADS127_SINGLE_SPI_BUS` → instance, USART3, **`ads127_pins_init()` then `MX_SPI_Init()`**, bring-up retry, TI `t_c(SC)` check, STATUS RREG, **START** + **`ADS127_START_STREAM_SETTLE_MS`**, **`ads127_post_start_gate`**, non-strict **`ads127_after_failed_post_start_gate()`** on gate fail, tight **`ads127_read_sample24_blocking`** + ~1 Hz printf |
 | `src/ads127l11.c` / `src/ads127l11.h` | RREG/WREG, shadow refresh, **`ads127_read_sample24_ch_blocking`** (CS → 100 ns → SPE off → MISO GPIO pull-up DRDY poll → AF → 24 SCLK burst), gate + recovery helpers |
+| `src/pat_spi_h7_master.c` / `include/pat_spi_h7_master.h` | H7 SPI v2 polled **`pat_spi_h7_master_txrx`** (shared abort cleanup); **`pat_spi_h7_master_cfg_from_hspi`** after `HAL_SPI_Init` |
 | `src/stm32h7xx_hal_msp.c` | `HAL_SPI_MspInit` for SPI1–SPI4 AF |
 | `src/pat_clock.c` | PLL + `HAL_InitTick` |
 | `CMakeLists.txt` | `APP_SINGLE_ADS127_SPI_SRC` + `target_compile_definitions(... PAT_ADS127_SINGLE_SPI_BUS=${bus})` |

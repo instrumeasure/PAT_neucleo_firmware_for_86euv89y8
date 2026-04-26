@@ -85,8 +85,8 @@ static inline uint8_t miso_pin_pos(uint16_t pin)
 }
 
 /**
- * H7: MISO as GPIO input so `IDR` follows SDO/DRDY (AF+SPE=0 is unreliable). Pull-up when ADC tri-states.
- * Register-only (no `HAL_GPIO_Init`) — hot path for every sample / quartet arm.
+ * H7: MISO as GPIO input so `IDR` follows SDO/DRDY (AF+SPE=0 is unreliable for that pad). Pull-up when ADC tri-states.
+ * SPI4 quartet/single PE15 path does not use this — sense is on PE15; PE13 MISO stays AF. Register-only (no HAL_GPIO_Init).
  */
 static void ch_miso_enter_gpio_input(const ads127_ch_ctx_t *c)
 {
@@ -121,6 +121,41 @@ static void ch_miso_restore_af(const ads127_ch_ctx_t *c)
     const uint32_t m = 0xFuL << (uint32_t)(sh * 4u);
     p->AFR[1] = (p->AFR[1] & ~m) | (af << (uint32_t)(sh * 4u));
   }
+}
+
+/** SPI4: poll duplicate SDO/!DRDY net on PE15; PE13 stays AF5 MISO (quartet leaves SPE on through PE15 wait). */
+static inline int ch_ctx_is_spi4(const ads127_ch_ctx_t *c)
+{
+  return (c->hspi != NULL && c->hspi->Instance == SPI4) ? 1 : 0;
+}
+
+static inline uint32_t spi4_drdy_sense_line_high_raw(void)
+{
+  return (PAT_PINMAP_SPI4_MISO_DRDY_SENSE_PORT->IDR & (uint32_t)PAT_PINMAP_SPI4_MISO_DRDY_SENSE_PIN) != 0u ? 1u : 0u;
+}
+
+static void ch_drdy_arm_enter(const ads127_ch_ctx_t *c)
+{
+  if (ch_ctx_is_spi4(c) != 0) {
+    return;
+  }
+  ch_miso_enter_gpio_input(c);
+}
+
+static inline uint32_t ch_drdy_line_high_raw(const ads127_ch_ctx_t *c)
+{
+  if (ch_ctx_is_spi4(c) != 0) {
+    return spi4_drdy_sense_line_high_raw();
+  }
+  return ch_miso_high_raw(c);
+}
+
+static void ch_drdy_arm_exit(const ads127_ch_ctx_t *c)
+{
+  if (ch_ctx_is_spi4(c) != 0) {
+    return;
+  }
+  ch_miso_restore_af(c);
 }
 
 static uint8_t g_ads127_dwt_poll_on;
@@ -353,6 +388,15 @@ void ads127_pins_init(void)
   HAL_GPIO_Init(PORT_RST, &g);
   HAL_GPIO_WritePin(PORT_RST, PIN_RST, GPIO_PIN_SET);
   HAL_GPIO_WritePin(PORT_START, PIN_START, GPIO_PIN_RESET);
+
+  {
+    GPIO_InitTypeDef g_pe15 = {0};
+    g_pe15.Pin = PAT_PINMAP_SPI4_MISO_DRDY_SENSE_PIN;
+    g_pe15.Mode = GPIO_MODE_INPUT;
+    g_pe15.Pull = GPIO_PULLUP;
+    g_pe15.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    HAL_GPIO_Init(PAT_PINMAP_SPI4_MISO_DRDY_SENSE_PORT, &g_pe15);
+  }
 }
 
 void ads127_cs_probe_pulse_ms(uint32_t ms_low)
@@ -728,20 +772,22 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
   delay_after_cs_100ns();
 
   SPI_HandleTypeDef *const hs = ch->hspi;
-  __HAL_SPI_DISABLE(hs);
-  __DSB();
-  ch_miso_enter_gpio_input(ch);
-  dg->drdy_skipped_arm_high = (ch_miso_high_raw(ch) == 0u) ? 1u : 0u;
+  if (ch_ctx_is_spi4(ch) == 0) {
+    __HAL_SPI_DISABLE(hs);
+    __DSB();
+  }
+  ch_drdy_arm_enter(ch);
+  dg->drdy_skipped_arm_high = (ch_drdy_line_high_raw(ch) == 0u) ? 1u : 0u;
   {
     ads127_dwt_poll_ensure();
     const uint32_t cyc_lim = ads127_ms_to_dwt_cycles(timeout_ms);
     const uint32_t c0 = DWT->CYCCNT;
     for (;;) {
-      if (ch_miso_high_raw(ch) == 0u) {
+      if (ch_drdy_line_high_raw(ch) == 0u) {
         break;
       }
       if ((uint32_t)(DWT->CYCCNT - c0) > cyc_lim) {
-        ch_miso_restore_af(ch);
+        ch_drdy_arm_exit(ch);
         __HAL_SPI_ENABLE(hs);
         __DSB();
         ch_cs_high(ch);
@@ -750,7 +796,7 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
       }
     }
   }
-  ch_miso_restore_af(ch);
+  ch_drdy_arm_exit(ch);
   __HAL_SPI_ENABLE(hs);
   __DSB();
 
@@ -788,14 +834,18 @@ uint32_t ads127_get_quartet_acquired_count(void)
 
 #if PAT_QUARTET_PARALLEL_DRDY_WAIT
 
-/** Undo quartet parallel arm: MISO AF + SPI enable for `from`..3, then !CS high (batched when `from==0`). */
+/**
+ * After quartet PE15 DRDY wait: SPI1–3 were never MISO-GPIO-armed here; SPI4 `ch_drdy_arm_enter` is a no-op.
+ * Re-arm SPE only (no `ch_miso_restore_af`). SPI4 first to minimise PE15 !DRDY → SPI4 SCLK on LA.
+ */
 static void quartet_release_armed_from(ads127_ch_ctx_t ctxs[ADS127_QUARTET_CHANNELS], unsigned from)
 {
-  for (unsigned j = from; j < ADS127_QUARTET_CHANNELS; j++) {
-    const ads127_ch_ctx_t *ch = &ctxs[j];
-    SPI_HandleTypeDef *const hs = ch->hspi;
-    ch_miso_restore_af(ch);
-    __HAL_SPI_ENABLE(hs);
+  if (from <= 3u) {
+    __HAL_SPI_ENABLE(ctxs[3].hspi);
+    __DSB();
+  }
+  for (unsigned j = from; j < 3u; j++) {
+    __HAL_SPI_ENABLE(ctxs[j].hspi);
     __DSB();
   }
   if (from == 0u) {
@@ -891,55 +941,27 @@ static HAL_StatusTypeDef read_quartet_blocking_parallel(
     uint32_t timeout_ms,
     ads127_diag_t dg[ADS127_QUARTET_CHANNELS])
 {
-#if !PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
-  uint8_t drdy_ready[ADS127_QUARTET_CHANNELS] = {0};
-#endif
   uint8_t arm_skip_snap[ADS127_QUARTET_CHANNELS];
   quartet_ncs_all_assert_bsrr();
   delay_after_cs_100ns();
-#if PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
-  /* DRDY gate reads SPI4 MISO only — only SPI4 needs SPE off + GPIO MISO for reliable IDR poll. */
+  /* DRDY gate: SPI4 !DRDY on PE15; SPI1–4 leave SPE unchanged here (matches SPI1–3). PE13 stays AF5. SPI1–3 not MISO-armed. */
   for (unsigned i = 0u; i < 3u; i++) {
     dg[i].drdy_skipped_arm_high = 0u;
     arm_skip_snap[i] = 0u;
   }
   {
-    SPI_HandleTypeDef *const hs = ctxs[3].hspi;
-    __HAL_SPI_DISABLE(hs);
-    __DSB();
-    ch_miso_enter_gpio_input(&ctxs[3]);
-    dg[3].drdy_skipped_arm_high = (ch_miso_high_raw(&ctxs[3]) == 0u) ? 1u : 0u;
+    ch_drdy_arm_enter(&ctxs[3]);
+    dg[3].drdy_skipped_arm_high = (ch_drdy_line_high_raw(&ctxs[3]) == 0u) ? 1u : 0u;
     arm_skip_snap[3] = dg[3].drdy_skipped_arm_high;
   }
-#else
-  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
-    SPI_HandleTypeDef *const hs = ctxs[i].hspi;
-    __HAL_SPI_DISABLE(hs);
-    __DSB();
-    ch_miso_enter_gpio_input(&ctxs[i]);
-    dg[i].drdy_skipped_arm_high = (ch_miso_high_raw(&ctxs[i]) == 0u) ? 1u : 0u;
-    arm_skip_snap[i] = dg[i].drdy_skipped_arm_high;
-  }
-#endif
 
   ads127_dwt_poll_ensure();
   const uint32_t cyc_lim = ads127_ms_to_dwt_cycles(timeout_ms);
   const uint32_t c0 = DWT->CYCCNT;
   for (;;) {
-#if PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
-    if (ch_miso_high_raw(&ctxs[3]) == 0u) {
+    if (ch_drdy_line_high_raw(&ctxs[3]) == 0u) {
       break;
     }
-#else
-    for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
-      if (drdy_ready[i] == 0u && ch_miso_high_raw(&ctxs[i]) == 0u) {
-        drdy_ready[i] = 1u;
-      }
-    }
-    if (drdy_ready[0u] != 0u && drdy_ready[1u] != 0u && drdy_ready[2u] != 0u && drdy_ready[3u] != 0u) {
-      break;
-    }
-#endif
     if ((uint32_t)(DWT->CYCCNT - c0) > cyc_lim) {
       quartet_release_armed_from(ctxs, 0u);
       for (unsigned k = 0u; k < ADS127_QUARTET_CHANNELS; k++) {
@@ -950,24 +972,19 @@ static HAL_StatusTypeDef read_quartet_blocking_parallel(
       memset(dg, 0, sizeof(ads127_diag_t) * ADS127_QUARTET_CHANNELS);
       for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
         dg[i].drdy_skipped_arm_high = arm_skip_snap[i];
-#if PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
-        if (i == 3u && ch_miso_high_raw(&ctxs[3]) != 0u) {
+        if (i == 3u && ch_drdy_line_high_raw(&ctxs[3]) != 0u) {
           dg[i].drdy_timeouts = 1u;
         }
-#else
-        if (drdy_ready[i] == 0u) {
-          dg[i].drdy_timeouts = 1u;
-        }
-#endif
       }
       return HAL_TIMEOUT;
     }
   }
 
-  for (unsigned i = 0u; i < ADS127_QUARTET_CHANNELS; i++) {
-    const ads127_ch_ctx_t *ch = &ctxs[i];
-    ch_miso_restore_af(ch);
-    __HAL_SPI_ENABLE(ch->hspi);
+  /* No `ch_drdy_arm_exit`: SPI1–3 never MISO-armed this epoch; SPI4 arm is a no-op. SPI4 SPE first for LA. */
+  __HAL_SPI_ENABLE(ctxs[3].hspi);
+  __DSB();
+  for (unsigned i = 0u; i < 3u; i++) {
+    __HAL_SPI_ENABLE(ctxs[i].hspi);
     __DSB();
   }
 

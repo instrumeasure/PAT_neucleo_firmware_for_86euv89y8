@@ -144,13 +144,11 @@ int main(void)
   printf("\r\nPAT Milestone quartet — TI 3-wire SPI (SBAS946): all !CS held low; frames by SCLK count only\r\n");
 #endif
 #if PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED
-  printf("\r\nPAT Milestone quartet — !CS all four; DRDY gate as configured; SPI1..4 sequential unlocked 3B (diag)\r\n");
+  printf("\r\nPAT Milestone quartet — !CS all four; SPI4 PE15 !DRDY gate; SPI1..4 sequential unlocked 3B (diag)\r\n");
 #elif PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER
-  printf("\r\nPAT Milestone quartet — !CS all four; DRDY gate as configured; interleaved register SPI1..4 (no HAL SPI IT)\r\n");
-#elif PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
-  printf("\r\nPAT Milestone quartet — !CS all four; SPI4 MISO !DRDY/SDO gate only; parallel SPI IT SPI1..SPI4\r\n");
+  printf("\r\nPAT Milestone quartet — !CS all four; SPI4 PE15 !DRDY gate; interleaved register SPI1..4 (no HAL SPI IT)\r\n");
 #else
-  printf("\r\nPAT Milestone quartet — !CS all four; all-MISO DRDY gate; parallel SPI IT on SPI1..SPI4\r\n");
+  printf("\r\nPAT Milestone quartet — !CS all four; SPI4 PE15 !DRDY gate; parallel SPI IT SPI1..SPI4\r\n");
 #endif
   {
     uint32_t k1 = HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SPI123);

@@ -24,19 +24,14 @@
 
 /**
  * **`pat_nucleo_quartet`:** CMake always sets **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`**. `ads127_read_quartet_blocking`
- * asserts all four !CS, waits for DRDY on MISO **before** any SCLK, then the 3-byte sample: default
- * **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER`** → `pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi` (interleaved
- * register SPI); **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=OFF`** → `HAL_SPI_TransmitReceive_IT` on SPI1..SPI4.
- * With **`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY`**: only **SPI4** MISO (`ctxs[3]`) gates the epoch; **OFF** waits all
- * four MISO. Other firmware images leave this macro **0**; `ads127_read_quartet_blocking` then returns **HAL_ERROR**.
+ * asserts all four !CS, waits for **SPI4 !DRDY on PE15** (duplicate MISO net) **before** any SCLK, then the 3-byte
+ * sample: default **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER`** → `pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi`
+ * (interleaved register SPI); **`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=OFF`** → `HAL_SPI_TransmitReceive_IT` on
+ * SPI1..SPI4. Other firmware images leave **`PAT_QUARTET_PARALLEL_DRDY_WAIT`** **0**; `ads127_read_quartet_blocking` then
+ * returns **HAL_ERROR**.
  */
 #ifndef PAT_QUARTET_PARALLEL_DRDY_WAIT
 #define PAT_QUARTET_PARALLEL_DRDY_WAIT 0
-#endif
-
-/** **1:** with `PAT_QUARTET_PARALLEL_DRDY_WAIT`: DRDY wait uses **SPI4 MISO only** (`ctxs[3]`); parallel IT unchanged. CMake only. */
-#ifndef PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY
-#define PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY 0
 #endif
 
 /**
@@ -177,9 +172,9 @@ HAL_StatusTypeDef ads127_read_sample24_ch_blocking(
     ads127_diag_t *dg);
 
 /**
- * One epoch ( **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`** on `pat_nucleo_quartet` ): shared !CS, SPI4-only or all-MISO
- * DRDY wait, then register quartet SPI (default) or HAL SPI IT. Returns **HAL_ERROR** if this translation unit was
- * built without quartet parallel support (`PAT_QUARTET_PARALLEL_DRDY_WAIT=0`).
+ * One epoch ( **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`** on `pat_nucleo_quartet` ): shared !CS, **SPI4 PE15** !DRDY
+ * gate, then register quartet SPI (default) or HAL SPI IT. Returns **HAL_ERROR** if this translation unit was built
+ * without quartet parallel support (`PAT_QUARTET_PARALLEL_DRDY_WAIT=0`).
  *
  * **Partial epoch:** on fail at `i`, `< i` valid, `> i` **0xFF**; parallel timeout / SPI fault paths clear similarly.
  */

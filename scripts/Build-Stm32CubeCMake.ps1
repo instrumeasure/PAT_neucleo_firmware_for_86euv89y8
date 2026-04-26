@@ -42,8 +42,7 @@ try {
   $toolchain = Join-Path $RepoRoot "cmake\gcc-arm-none-eabi.cmake"
   # Optional: halt on ADS127 bring-up / post-START gate failure (default OFF = warn and continue):
   #   cmake ... -DPAT_ADS127_STRICT_BRINGUP=ON
-  # Quartet (see AGENTS): `pat_nucleo_quartet` always uses shared !CS + parallel DRDY epoch (CMake).
-  # Optional overrides, e.g. `-DPAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=OFF` for all-MISO DRDY wait.
+  # Quartet (see AGENTS): `pat_nucleo_quartet` always uses shared !CS + SPI4 PE15 DRDY epoch (CMake).
   # Optional TI SBAS946 §8.5.9 3-wire SPI (all !CS held low): add
   #   "-DPAT_ADS127_SPI_3WIRE_CS_HELD_LOW=ON" `
   # Throughput / LA correlate (quartet README § epoch vs ODR), e.g.:
@@ -54,7 +53,6 @@ try {
   cmake -G Ninja `
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
     "-DSTM32_CUBE_H7_FW=$($env:STM32_CUBE_H7_FW)" `
-    "-DPAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=ON" `
     $RepoRoot
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   cmake --build .

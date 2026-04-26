@@ -9,9 +9,9 @@ Firmware target: **`pat_nucleo_quartet`** (`src/main_quartet.c`). One **epoch** 
 
 **LA sign-off (parallel default):** during the post-DRDY 3-byte window, verify **SCLK on SPI1, SPI2, SPI3, and SPI4** all toggle in a **common time window** (compare to a capture with **`REGISTER_MASTER=OFF`** on the same HAT). UART **`EPOCH` / `epoch_hz_est`**, **`quartets_ok`**, and per-channel **`to` / `arm_skip`** should stay in the same class as the IT baseline.
 
-**LA looks “dead” / no SCLK:** (1) Trigger on **any** `!CS` (all four fall together in parallel 4-wire) — SCLK is **bursty** (~24 edges per 3-byte read), not a free-running clock. (2) With **`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=OFF`**, the epoch waits until **all four** MISO/DRDY lines indicate ready; a missing or stuck-high channel ⇒ **40 ms** `QUARTET_DRDY_TIMEOUT_MS` loops with **no** sample SCLK — use **`-DPAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=ON`** if only SPI4 MISO is valid. (3) Confirm VCP: **`to`** (DRDY timeout) and **`quartet_fail_total`** vs **`quartets_ok_total`**.
+**LA looks “dead” / no SCLK:** (1) Trigger on **any** `!CS` (all four fall together in parallel 4-wire) — SCLK is **bursty** (~24 edges per 3-byte read), not a free-running clock. (2) The epoch always gates on **SPI4 !DRDY** read from **PE15** (duplicate MISO net); if **PE15** is floating or wrong net, **`QUARTET_DRDY_TIMEOUT_MS`** loops with **no** sample SCLK. (3) Confirm VCP: **`to`** (DRDY timeout) and **`quartet_fail_total`** vs **`quartets_ok_total`**.
 
-**SPI4-only gate (`PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=ON`):** only **SPI4** MISO is taken through **`SPE` off** + GPIO input for the DRDY wait; UART **`arm_skip` on ch0–2** is always **0** (not part of the gate — see `read_quartet_blocking_parallel` in [`src/ads127l11.c`](../../src/ads127l11.c)).
+**DRDY gate:** **SPI4** only — **`SPE` off** on SPI4, **PE15** `IDR` poll (PE13 MISO stays AF5); UART **`arm_skip` on ch0–2** is always **0** (see `read_quartet_blocking_parallel` in [`src/ads127l11.c`](../../src/ads127l11.c)).
 
 ## J1 routing (legacy HAT 86euv89y8)
 

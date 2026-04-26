@@ -59,6 +59,7 @@
 | SCK | **PE12** | AF5 SPI4 |
 | MOSI | **PE6** | AF5 SPI4 |
 | MISO / SDO (DRDY poll pad) | **PE13** | AF5 SPI4 |
+| SDO/!DRDY sense (duplicate MISO net, GPIO input for DRDY arm) | **PE15** | — |
 
 ## J2 — SPI6 slave (QPD / host), AF8
 

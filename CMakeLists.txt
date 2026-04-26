@@ -19,8 +19,7 @@ option(PAT_ADS127_SPI_HAL_LEGACY "ADS127 SPI: legacy HAL transfers (bisect)" OFF
 option(PAT_SPI2_PC2SO_OPEN_INSTEAD "SPI2: SET PMCR.PC2SO (open); default is CLEAR (closed)" OFF)
 
 # `pat_nucleo_quartet` always builds with **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`** (shared !CS + DRDY gate + parallel sample).
-# **SPI4 MISO only** vs **all four MISO** for the DRDY wait:
-option(PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY "pat_nucleo_quartet: PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=1" ON)
+# DRDY gate is always SPI4 **PE15** (duplicate SDO/!DRDY net); no CMake toggle.
 
 # TI SBAS946 §8.5.9: hold all J1 !CS low from init through nRESET so each ADS127 enters 3-wire SPI (no !CS high edges).
 option(PAT_ADS127_SPI_3WIRE_CS_HELD_LOW "pat_nucleo_quartet: PAT_ADS127_SPI_3WIRE_CS_HELD_LOW=1 (TI 3-wire)" OFF)
@@ -206,9 +205,6 @@ add_executable(pat_nucleo_quartet
 )
 
 target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_DRDY_WAIT=1)
-if(PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY)
-  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_SPI4_DRDY_ONLY=1)
-endif()
 
 if(PAT_ADS127_SPI_3WIRE_CS_HELD_LOW)
   target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_ADS127_SPI_3WIRE_CS_HELD_LOW=1)

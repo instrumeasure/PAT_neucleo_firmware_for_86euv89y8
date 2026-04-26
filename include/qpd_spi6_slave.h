@@ -8,5 +8,6 @@
 
 void qpd_spi6_slave_init(SPI_HandleTypeDef *hspi);
 void qpd_spi6_slave_pack_latest(const ads127_sample_set_t *s, const qpd_dsp_output_t *dsp);
+void qpd_spi6_slave_stage_frame64(const uint8_t frame64[64]);
 
 #endif

@@ -4,8 +4,7 @@
 
 int32_t pat_quartet_sign_extend_u24(uint32_t u24)
 {
-  u24 &= 0xFFFFFFu;
-  return (int32_t)(u24 << 8u) >> 8;
+  return ads127_raw24_to_s32(u24);
 }
 
 void pat_quartet_epoch_line_publish(pat_quartet_epoch_line_t *line, const uint8_t raw24[ADS127_QUARTET_CHANNELS][3])

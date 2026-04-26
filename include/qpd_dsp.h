@@ -4,6 +4,23 @@
 #include <stdint.h>
 #include "ads127l11.h"
 
+#ifndef ADS127_SYNC_CHANNELS
+#define ADS127_SYNC_CHANNELS ADS127_QUARTET_CHANNELS
+#endif
+
+#ifndef ADS127_RAW_INVALID
+#define ADS127_RAW_INVALID ((int32_t)-1)
+#endif
+
+#ifndef ADS127_SAMPLE_SET_T_DEFINED
+#define ADS127_SAMPLE_SET_T_DEFINED 1
+typedef struct
+{
+    uint32_t sample_index;
+    int32_t raw[ADS127_SYNC_CHANNELS];
+} ads127_sample_set_t;
+#endif
+
 #define QPD_RING_LEN 16U
 #define QPD_SUM_SHIFT 4U
 

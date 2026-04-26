@@ -85,6 +85,21 @@ void qpd_spi6_slave_pack_latest(const ads127_sample_set_t *s, const qpd_dsp_outp
     }
 }
 
+void qpd_spi6_slave_stage_frame64(const uint8_t frame64[64])
+{
+    if (frame64 == NULL)
+    {
+        return;
+    }
+    {
+        uint32_t primask = __get_PRIMASK();
+        __disable_irq();
+        memcpy(g_tx_staging, frame64, 64U);
+        g_staging_valid = 1U;
+        __set_PRIMASK(primask);
+    }
+}
+
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     if (g_hspi6 == NULL || hspi != g_hspi6)

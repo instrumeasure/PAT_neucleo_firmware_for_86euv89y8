@@ -192,7 +192,7 @@ static void run_one_phase(const spi_bus_phase_t *ph)
         HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
         uint32_t u24 =
             ((uint32_t)samp[0] << 16) | ((uint32_t)samp[1] << 8) | (uint32_t)samp[2];
-        int32_t s24 = (int32_t)((u24 & 0xFFFFFFu) << 8) >> 8;
+        int32_t s24 = ads127_raw24_to_s32(u24);
         printf("ADC,ch%u,tick_ms=%lu,raw24=0x%06lX,sdec=%ld,st=%u,to=%lu,arm_skip=%u\r\n",
                (unsigned)ph->log_ch,
                (unsigned long)now,

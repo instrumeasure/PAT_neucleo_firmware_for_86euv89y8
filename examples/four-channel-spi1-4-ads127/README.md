@@ -2,6 +2,8 @@
 
 Firmware target: **`pat_nucleo_quartet`** (`src/main_quartet.c`). One **epoch** = one sample vector **`raw[4]`** for logical ch0..3 (SPI1..SPI4 per [`AGENTS.md`](../../AGENTS.md) `quartet_order`). The quartet image **always** uses shared **`!CS`** (**`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`**): all four **`!CS`** are **low together** for the DRDY wait and sample phase, then deasserted (4-wire). Per-channel sequential quartet (`ads127_read_sample24_ch_blocking` in a loop) is **not** a shipped mode. No RTOS.
 
+**SCLK → !CS, EOT teardown, LA probes:** see [QUARTET_LA_TIMING.md](QUARTET_LA_TIMING.md) (canonical quartet timing note for the logic analyser).
+
 ### Parallel sample phase: register SPI (default) vs HAL IT (bisect)
 
 - **Default (`PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=ON`):** after the shared DRDY gate, the 3-byte read uses **`pat_spi_h7_quartet_parallel_txrx_zero3_from_hspi`** — **interleaved** `TXDR`/`RXDR` polling on **SPI1..SPI4** so **SCLK can overlap on all buses** without **`HAL_SPI_TransmitReceive_IT`** or SPI NVIC for data (see [`src/pat_spi_h7_master.c`](../../src/pat_spi_h7_master.c), [`src/ads127l11.c`](../../src/ads127l11.c) `read_quartet_blocking_parallel`). RREG/WREG use **`pat_spi_h7_master_txrx`** unless the image is built with **`-DPAT_ADS127_SPI_HAL_LEGACY=ON`** (same CMake option as other PAT ELFs).
@@ -12,6 +14,14 @@ Firmware target: **`pat_nucleo_quartet`** (`src/main_quartet.c`). One **epoch** 
 **LA looks “dead” / no SCLK:** (1) Trigger on **any** `!CS` (all four fall together in parallel 4-wire) — SCLK is **bursty** (~24 edges per 3-byte read), not a free-running clock. (2) The epoch always gates on **SPI4 !DRDY** read from **PE15** (duplicate MISO net); if **PE15** is floating or wrong net, **`QUARTET_DRDY_TIMEOUT_MS`** loops with **no** sample SCLK. (3) Confirm VCP: **`to`** (DRDY timeout) and **`quartet_fail_total`** vs **`quartets_ok_total`**.
 
 **DRDY gate:** **SPI4** only — **`SPE` off** on SPI4, **PE15** `IDR` poll (PE13 MISO stays AF5); UART **`arm_skip` on ch0–2** is always **0** (see `read_quartet_blocking_parallel` in [`src/ads127l11.c`](../../src/ads127l11.c)).
+
+### Rolling export (raw / I / Q, 8 taps, 3-bit DDS)
+
+- Module: [`include/pat_quartet_rolling.h`](../../include/pat_quartet_rolling.h), [`src/pat_quartet_rolling.c`](../../src/pat_quartet_rolling.c).
+- Publish contract (64 B, **fmt `0x0A`**): `epoch_seq` LE [0..3], header [4..7] = `fmt`, `dds_p`, `flags`, `wpos`, then 12x LE `int32` means (`raw[4]`, `i[4]`, `q[4]`) at [8..55], [56..63] reserved zero.
+- Producer model: `p64[2][64]` double slab; write scratch, then flip `read_idx`. Host-side semantics are **last published wins** (no firmware queue for missed epochs in v1).
+- Timing rule for this board path: keep `on_epoch` + fill + optional stage copy inside the **~20 µs class !CS->!DRDY margin**; do not block quartet acquisition waiting for SPI6 transfer completion.
+- Optional SPI6 link in quartet image: CMake `-DPAT_QUARTET_LINK_SPI6=ON` (J2 host pull path). Keep **one** staging writer in `main` (do not call QPD and quartet packers in the same epoch loop).
 
 ## J1 routing (legacy HAT 86euv89y8)
 

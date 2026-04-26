@@ -22,6 +22,16 @@
 
 #define ADS127_QUARTET_CHANNELS 4u
 
+/*
+ * ADS127L11 data words are 24-bit two's-complement, MSB first (SBAS946 serial output).
+ * For a 3-byte sample, out24[0] is the sign byte on the wire.
+ */
+static inline int32_t ads127_raw24_to_s32(uint32_t u24)
+{
+  u24 &= 0xFFFFFFu;
+  return (int32_t)(u24 << 8u) >> 8;
+}
+
 /**
  * **`pat_nucleo_quartet`:** CMake always sets **`PAT_QUARTET_PARALLEL_DRDY_WAIT=1`**. `ads127_read_quartet_blocking`
  * asserts all four !CS, waits for **SPI4 !DRDY on PE15** (duplicate MISO net) **before** any SCLK, then the 3-byte

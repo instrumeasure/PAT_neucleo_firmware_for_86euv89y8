@@ -1,6 +1,7 @@
 .pio
 cmake-build/
 cmake-build-3w/
+cmake-build-*/
 
 # Cursor / local editor stores (not project source)
 .settings/

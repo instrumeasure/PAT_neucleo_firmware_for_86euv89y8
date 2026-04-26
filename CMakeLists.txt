@@ -34,6 +34,9 @@ option(PAT_QUARTET_PARALLEL_SPI_RX3_SEQ_UNLOCKED "pat_nucleo_quartet: PAT_QUARTE
 # OFF = HAL_SPI_TransmitReceive_IT + NVIC SPI1..4 IRQ.
 option(PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER "pat_nucleo_quartet: register SPI sample in parallel epoch (no HAL SPI IT)" ON)
 
+# Optional J2 export in quartet image: links SPI6 slave staging path and exposes rolling 64B frame (fmt 0x0A).
+option(PAT_QUARTET_LINK_SPI6 "pat_nucleo_quartet: link SPI6 slave + qpd_spi6 staging for rolling payload" OFF)
+
 set(PAT_SPI123_PRESCALER_DIV "64" CACHE STRING "pat_nucleo_quartet: SPI1–3 HAL baud prescaler divisor (8|16|32|64)")
 set_property(CACHE PAT_SPI123_PRESCALER_DIV PROPERTY STRINGS 8 16 32 64)
 if(NOT PAT_SPI123_PRESCALER_DIV MATCHES "^(8|16|32|64)$")
@@ -191,12 +194,17 @@ set(APP_QUARTET_SRC
   "${CMAKE_SOURCE_DIR}/src/pat_spi_ads127.c"
   "${CMAKE_SOURCE_DIR}/src/pat_spi_h7_master.c"
   "${CMAKE_SOURCE_DIR}/src/pat_quartet_epoch.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_quartet_rolling.c"
   "${CMAKE_SOURCE_DIR}/src/pat_quartet_app.c"
   "${CMAKE_SOURCE_DIR}/src/pat_quartet_spi_irq.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
   "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
   "${CMAKE_SOURCE_DIR}/src/ads127l11.c"
 )
+
+if(PAT_QUARTET_LINK_SPI6)
+  list(APPEND APP_QUARTET_SRC "${CMAKE_SOURCE_DIR}/src/qpd_spi6_slave.c")
+endif()
 
 add_executable(pat_nucleo_quartet
   ${CMSIS_SRC}
@@ -220,6 +228,10 @@ endif()
 
 if(PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER)
   target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER=1)
+endif()
+
+if(PAT_QUARTET_LINK_SPI6)
+  target_compile_definitions(pat_nucleo_quartet PRIVATE PAT_QUARTET_LINK_SPI6=1)
 endif()
 
 if(PAT_SPI123_PRESCALER_DIV STREQUAL "8")

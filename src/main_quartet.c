@@ -8,8 +8,15 @@
 #include "pat_spi_ads127.h"
 #include "pat_quartet_app.h"
 #include "pat_quartet_epoch.h"
+#include "pat_quartet_rolling.h"
 #if PAT_QUARTET_PARALLEL_DRDY_WAIT
 #include "pat_quartet_spi_irq.h"
+#endif
+#ifndef PAT_QUARTET_LINK_SPI6
+#define PAT_QUARTET_LINK_SPI6 0
+#endif
+#if PAT_QUARTET_LINK_SPI6
+#include "qpd_spi6_slave.h"
 #endif
 #ifndef PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER
 #define PAT_QUARTET_PARALLEL_SPI_REGISTER_MASTER 0
@@ -29,6 +36,9 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 SPI_HandleTypeDef hspi3;
 SPI_HandleTypeDef hspi4;
+#if PAT_QUARTET_LINK_SPI6
+SPI_HandleTypeDef hspi6;
+#endif
 
 /** DRDY wait per channel (ms). ODR ~50 ksps ⇒ ~20 µs/conv; margin for scheduling + PC2 switch bring-up. */
 #define QUARTET_DRDY_TIMEOUT_MS 40u
@@ -96,6 +106,44 @@ static void MX_SPI_All_Init(void)
   pat_quartet_spi_parallel_irq_init();
 #endif
 }
+
+#if PAT_QUARTET_LINK_SPI6
+static void MX_SPI6_Slave_Init(void)
+{
+  hspi6.Instance = SPI6;
+  hspi6.Init.Mode = SPI_MODE_SLAVE;
+  hspi6.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi6.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi6.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi6.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi6.Init.NSS = SPI_NSS_HARD_INPUT;
+  hspi6.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi6.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi6.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi6.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi6.Init.CRCPolynomial = 0x7U;
+  hspi6.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  hspi6.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
+  hspi6.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
+  hspi6.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi6.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi6.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
+  hspi6.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
+  hspi6.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
+  hspi6.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+  hspi6.Init.IOSwap = SPI_IO_SWAP_DISABLE;
+  if (HAL_SPI_Init(&hspi6) != HAL_OK) {
+    Error_Handler();
+  }
+  HAL_NVIC_SetPriority(SPI6_IRQn, 6, 0);
+  HAL_NVIC_EnableIRQ(SPI6_IRQn);
+}
+
+void SPI6_IRQHandler(void)
+{
+  HAL_SPI_IRQHandler(&hspi6);
+}
+#endif
 
 static void quartet_bind(ads127_ch_ctx_t ctx[ADS127_QUARTET_CHANNELS])
 {
@@ -206,6 +254,11 @@ int main(void)
 
   ads127_ch_ctx_t ctx[ADS127_QUARTET_CHANNELS];
   quartet_bind(ctx);
+  pat_quartet_rolling_init();
+#if PAT_QUARTET_LINK_SPI6
+  MX_SPI6_Slave_Init();
+  qpd_spi6_slave_init(&hspi6);
+#endif
 
   pat_quartet_epoch_line_t epoch_line;
   memset(&epoch_line, 0, sizeof(epoch_line));
@@ -220,6 +273,11 @@ int main(void)
     memset(samp, 0xFF, sizeof(samp));
   } else {
     pat_quartet_epoch_line_publish(&epoch_line, samp);
+    pat_quartet_rolling_on_epoch(samp);
+    pat_quartet_rolling_payload_fill_from_acc();
+#if PAT_QUARTET_LINK_SPI6
+    qpd_spi6_slave_stage_frame64(pat_quartet_rolling_payload_read_slab(NULL));
+#endif
   }
 
   printf("first quartet st=%u (SPI1->4) quartets_ok_total=%lu\r\n",
@@ -260,6 +318,11 @@ int main(void)
       quartet_fail_total++;
     } else {
       pat_quartet_epoch_line_publish(&epoch_line, samp);
+      pat_quartet_rolling_on_epoch(samp);
+      pat_quartet_rolling_payload_fill_from_acc();
+#if PAT_QUARTET_LINK_SPI6
+      qpd_spi6_slave_stage_frame64(pat_quartet_rolling_payload_read_slab(NULL));
+#endif
     }
 
     const uint32_t now = HAL_GetTick();

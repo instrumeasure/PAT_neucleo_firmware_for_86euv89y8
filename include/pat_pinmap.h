@@ -129,4 +129,53 @@
 #define PAT_PINMAP_SPI6_GPIOG_AF_PINS \
   (PAT_PINMAP_SPI6_NSS_PIN | PAT_PINMAP_SPI6_MISO_PIN | PAT_PINMAP_SPI6_MOSI_PIN)
 
+/* ------------------------------------------------------------------ */
+/* SPI5 — MEMS / AD5664R master                                       */
+/* ------------------------------------------------------------------ */
+
+#define PAT_PINMAP_SPI5_NCS_PORT   GPIOF
+#define PAT_PINMAP_SPI5_NCS_PIN    GPIO_PIN_6
+#define PAT_PINMAP_SPI5_SCK_PORT   GPIOF
+#define PAT_PINMAP_SPI5_SCK_PIN    GPIO_PIN_7
+#define PAT_PINMAP_SPI5_MOSI_PORT  GPIOF
+#define PAT_PINMAP_SPI5_MOSI_PIN   GPIO_PIN_9
+#define PAT_PINMAP_SPI5_AF         GPIO_AF5_SPI5
+#define PAT_PINMAP_SPI5_AF_PINS \
+  (PAT_PINMAP_SPI5_SCK_PIN | PAT_PINMAP_SPI5_MOSI_PIN)
+
+/* ------------------------------------------------------------------ */
+/* UART5 — PolarFire control path                                     */
+/* ------------------------------------------------------------------ */
+
+#define PAT_PINMAP_UART5_TX_PORT   GPIOC
+#define PAT_PINMAP_UART5_TX_PIN    GPIO_PIN_12
+#define PAT_PINMAP_UART5_RX_PORT   GPIOD
+#define PAT_PINMAP_UART5_RX_PIN    GPIO_PIN_2
+#define PAT_PINMAP_UART5_AF        GPIO_AF8_UART5
+
+/* ------------------------------------------------------------------ */
+/* UART7 — laser serial path                                          */
+/* ------------------------------------------------------------------ */
+
+#define PAT_PINMAP_UART7_TX_PORT   GPIOE
+#define PAT_PINMAP_UART7_TX_PIN    GPIO_PIN_8
+#define PAT_PINMAP_UART7_RX_PORT   GPIOE
+#define PAT_PINMAP_UART7_RX_PIN    GPIO_PIN_7
+#define PAT_PINMAP_UART7_AF        GPIO_AF7_UART7
+
+/* ------------------------------------------------------------------ */
+/* MEMS / laser control GPIO                                          */
+/* ------------------------------------------------------------------ */
+
+#define PAT_PINMAP_MEMS_FCLK_X_PORT      GPIOC
+#define PAT_PINMAP_MEMS_FCLK_X_PIN       GPIO_PIN_9
+#define PAT_PINMAP_MEMS_FCLK_Y_PORT      GPIOA
+#define PAT_PINMAP_MEMS_FCLK_Y_PIN       GPIO_PIN_8
+#define PAT_PINMAP_MEMS_EN_PORT          GPIOA
+#define PAT_PINMAP_MEMS_EN_PIN           GPIO_PIN_9
+#define PAT_PINMAP_LASER_DRIVER_OC_PORT  GPIOB
+#define PAT_PINMAP_LASER_DRIVER_OC_PIN   GPIO_PIN_8
+#define PAT_PINMAP_LASER_INT_LOCK_PORT   GPIOB
+#define PAT_PINMAP_LASER_INT_LOCK_PIN    GPIO_PIN_9
+
 #endif /* PAT_PINMAP_H */

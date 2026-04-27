@@ -114,6 +114,8 @@ set(HAL_SRC
   "${HAL_DIR}/Src/stm32h7xx_hal_spi_ex.c"
   "${HAL_DIR}/Src/stm32h7xx_hal_uart.c"
   "${HAL_DIR}/Src/stm32h7xx_hal_uart_ex.c"
+  "${HAL_DIR}/Src/stm32h7xx_hal_tim.c"
+  "${HAL_DIR}/Src/stm32h7xx_hal_tim_ex.c"
   "${HAL_DIR}/Src/stm32h7xx_hal_dma.c"
   "${HAL_DIR}/Src/stm32h7xx_hal_dma_ex.c"
   "${HAL_DIR}/Src/stm32h7xx_hal_exti.c"
@@ -353,3 +355,39 @@ if(PAT_ADS127_SPI_HAL_LEGACY)
     target_compile_definitions(pat_nucleo_spi${bus}_ads127 PRIVATE PAT_ADS127_SPI_HAL_LEGACY=1)
   endforeach()
 endif()
+
+# SPI5 MEMS mirror + UART5/7 command path bring-up target.
+set(APP_MEMS_SRC
+  "${CMAKE_SOURCE_DIR}/src/main_mems_bringup.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_clock.c"
+  "${CMAKE_SOURCE_DIR}/src/stm32h7xx_hal_msp.c"
+  "${CMAKE_SOURCE_DIR}/src/stm32h7xx_it.c"
+  "${CMAKE_SOURCE_DIR}/src/ad5664r.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_mems_regs.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_mems_sm.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_crc32.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_uart5_pat5.c"
+  "${CMAKE_SOURCE_DIR}/src/pat_uart7_laser.c"
+)
+
+add_executable(pat_nucleo_mems_bringup
+  ${CMSIS_SRC}
+  ${HAL_SRC}
+  ${APP_MEMS_SRC}
+)
+
+target_link_options(pat_nucleo_mems_bringup PRIVATE
+  ${CPU_FLAGS}
+  -T${LINKER_SCRIPT}
+  -Wl,--gc-sections
+  -Wl,-Map=$<TARGET_FILE_DIR:pat_nucleo_mems_bringup>/pat_nucleo_mems_bringup.map
+  --specs=nano.specs
+  --specs=nosys.specs
+  -Wl,--print-memory-usage
+)
+
+add_custom_command(TARGET pat_nucleo_mems_bringup POST_BUILD
+  COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:pat_nucleo_mems_bringup>
+          $<TARGET_FILE_DIR:pat_nucleo_mems_bringup>/pat_nucleo_mems_bringup.bin
+  COMMAND ${CMAKE_SIZE} $<TARGET_FILE:pat_nucleo_mems_bringup>
+)

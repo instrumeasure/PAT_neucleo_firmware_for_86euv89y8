@@ -38,6 +38,7 @@ quartet_rolling_margin,~20us class|On 86euv89y8 use !CS→!DRDY margin for `on_e
 clk_source,HAT generates CLK → MCU does not drive unless you add MCO/TIM doc’d in code
 qpd_dsp,3×16 ring per path raw|I|Q y=(sum)>>4|p nibble in SPI6 hdr
 spi6_j2,PA5 SCK PG8 NSS PG12 MISO PG14 MOSI|SPI6 slave fmt0x02 64B LE sample_index+8B hdr+4×3×24b BE+pad|IT double-buffer
+spi6_host,docs/SPI6_HOST_MANUAL.md|J2 **master** wiring, SPI **mode 1** (CPOL0 CPHA1), 64B/NSS, parse **fmt0x0A** rolling (see `quartet_rolling_export`) vs `0x02` QPD pack
 spi6_sclk,master sets f_SCLK|target &gt; SPI1–4 and &gt; 14.4 MHz per system design or AGENTS waiver
 ```
 
@@ -51,12 +52,12 @@ as_built,AGENTS line|f_SCLK J1+J2|T_xfer 64B|bench vs production HDL
 ```toon
 review_packet[stm32 §7.2]
 files,stm32h7xx_it.c|qpd_spi6_slave.c HAL_SPI_*Cplt|single callback owner
-nvic,TIM6 DAC vs SPI6 priorities|5 vs 6 typical
+nvic,SPI1-4+SPI6 highest tier|UART5_MEMS_SPI5_lower_tier_main_when_idle|TIM6_DAC vs SPI6 typical 5 vs 6 in ref image
 it_dma,SPI6 IT+static buffers|DMA only if D-cache rules met
 pointers,stm32h7-hal-pitfalls|stm32-firmware.mdc
 ```
 
-USART3 **PD8/PD9** → ST-Link VCP **115200**.
+USART3 **PD8/PD9** → ST-Link VCP **115200**. **Production UARTs (two):** **UART5** (**PC12**/**PD2**, MCU HAT **J2**) ↔ **PolarFire** commands / telemetry (**921600** typical per **02b1-mcu-pinmap.md**); **UART7** (**PE8**/**PE7**) ↔ **laser driver** (MCU hosts link; protocol per module — e.g. [SF8XXX_TO56B manual PDF](https://www.laserdiodecontrol.com/files/manuals/laserdiodecontrol_com/10237/SF8XXX_TO56B_Manual-1720730740.pdf), see [PINMAP.md](PINMAP.md) § UART7). Laser digital control connector adds **PB8** `laser_driver_oc` (pin 7) and **PB9** `int_lock` (pin 6), GPIO semantics/polarity frozen in UART7 + pinmap docs. **I²C1** (**PB6**/ **PB7**, **J9** in stack inventory) ↔ **fibre converter** signal-intensity readout. **`pat_nucleo_mems_bringup` now initialises `UART5` + `UART7` (+ SPI5/TIM MEMS path)**; legacy acquisition targets remain USART3-centric unless extended. **UART5 wire format:** [docs/UART5_POLARFIRE_PAYLOAD.md](docs/UART5_POLARFIRE_PAYLOAD.md) (`PAT5` + **CRC-32** + `cmd` / `seq` / `flags`); **PolarFire → laser** opaque tunnel **`LASER_UART7_BYPASS` (0x0004, §8)**; laser **status** to PolarFire is **`GET_LASER_STATUS` (0x0005, §9)** — MCU keeps a **low-rate UART7** snapshot in RAM and answers **UART5** from cache (no per-query laser round-trip in v1). **UART7** planning / PDF link: [docs/UART7_LASER_DRIVER.md](docs/UART7_LASER_DRIVER.md) — **DMA + IDLE** RX, **vendor parser** in **main** (wire grammar from SF8xxx PDF, not PAT5).
 
 ```toon
 heartbeat[CSV per line ending CRLF ~1Hz]
